@@ -1,0 +1,12 @@
+{
+  "name": "Mini Factory: Idle Tycoon",
+  "short_name": "Mini Factory",
+  "description": "Küçük bir fabrikayı bir imparatorluğa dönüştür!",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1d2547",
+  "theme_color": "#1d2547",
+  "lang": "tr",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

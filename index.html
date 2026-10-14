@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1d2547">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Mini Factory: Idle Tycoon</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="hud">
+    <div class="hud-top">
+      <div class="money-pill" id="money-pill">
+        <span class="ico" data-icon="coin"></span>
+        <span id="money">0</span>
+      </div>
+      <button id="btn-daily" class="round-btn daily" aria-label="Günlük hediye" data-icon="gift" hidden></button>
+      <button id="btn-settings" class="round-btn" aria-label="Ayarlar" data-icon="gear"></button>
+    </div>
+    <div class="hud-bottom">
+      <div class="income"><span data-icon="bolt"></span><b id="income">0</b><small>/sn</small></div>
+      <div class="chips"><span id="stars-chip" class="mini-chip star" hidden></span><span id="boost-chip" class="mini-chip boost" hidden></span></div>
+      <div class="flevel">
+        <span id="flevel">Fabrika Sv.1</span>
+        <div class="bar"><i id="flevel-bar"></i></div>
+      </div>
+    </div>
+  </header>
+
+  <main id="stage">
+    <canvas id="game" aria-label="Fabrika"></canvas>
+    <button id="zone-prev" class="zone-arrow left" aria-label="Önceki bölge" hidden>‹</button>
+    <button id="zone-next" class="zone-arrow right" aria-label="Sonraki bölge" hidden>›</button>
+    <div id="toast" role="status"></div>
+  </main>
+
+  <footer id="dock">
+    <div class="mcard">
+      <div class="mc-info">
+        <div class="mc-name"><span id="mc-name">Blok Presi</span><b id="mc-lv">Sv.1</b></div>
+        <div class="mc-stats" id="mc-stats"></div>
+      </div>
+      <button id="btn-mult" class="chip" aria-label="Alım miktarı">x1</button>
+      <button id="btn-level" class="btn btn-green big">
+        <span class="lbl" id="lvl-lbl">YÜKSELT</span>
+        <span class="cost"><span class="ico sm" data-icon="coin"></span><i id="lvl-cost">75</i></span>
+      </button>
+    </div>
+    <nav class="navrow">
+      <button id="btn-buy" class="btn nav btn-orange"><span data-icon="cart"></span><span class="t">Makine Al</span><small id="buy-cost"></small></button>
+      <button id="btn-up" class="btn nav btn-blue"><span data-icon="wrench"></span><span class="t">Geliştir</span><small id="up-hint"></small></button>
+      <button id="btn-quests" class="btn nav btn-purple"><span data-icon="target"></span><span class="t">Görevler</span><em id="quest-badge" class="badge" hidden>0</em></button>
+      <button id="btn-zones" class="btn nav btn-teal"><span data-icon="map"></span><span class="t">Bölgeler</span></button>
+      <button id="btn-patent" class="btn nav btn-gold" hidden><span data-icon="star"></span><span class="t">Patent</span><small id="patent-hint"></small></button>
+    </nav>
+  </footer>
+
+  <div id="backdrop" hidden></div>
+  <section id="sheet" aria-modal="true" role="dialog" hidden>
+    <div class="sheet-head"><h2 id="sheet-title"></h2><button id="sheet-close" class="round-btn" aria-label="Kapat">✕</button></div>
+    <div id="sheet-body"></div>
+  </section>
+  <div id="modal" hidden></div>
+</div>
+<script type="module" src="src/main.js"></script>
+<noscript>Bu oyun JavaScript gerektirir.</noscript>
+</body>
+</html>
