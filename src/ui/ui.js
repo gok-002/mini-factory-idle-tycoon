@@ -1,17 +1,38 @@
 // DOM arayüzü: HUD, alt dock, paneller (sheet) ve pencereler. Oyun mantığına yalnızca Game API'si üzerinden dokunur.
-import { MACHINES, ZONES, QUESTS, UPGRADES, TUNING, PATENTS, PRESTIGE, DAILY } from '../core/config.js';
+import { MACHINES, ZONES, QUESTS, UPGRADES, TUNING, PATENTS, PRESTIGE, DAILY, ACHIEVEMENTS, ACH_BONUS, MISSIONS } from '../core/config.js';
 import {
   cycleTime, itemValue, storageCap, levelUpCost, maxAffordableLevels, factoryLevel, machineIncome,
-  prestigeGain, patentLvl, patentCost, permMult, prestigeUnlocked, prestigeProgress, prestigeNeed,
+  prestigeGain, patentLvl, patentCost, permMult, prestigeUnlocked, prestigeProgress, prestigeNeed, achCount,
 } from '../core/economy.js';
 import { formatNum, formatRate, formatDuration } from '../core/format.js';
 import { questProgress, questDone, questClaimed, questReward, claimableCount, visibleQuests, completedCount } from '../core/quests.js';
+import { achProgress, achDone } from '../core/achievements.js';
+import { encodeSave, decodeSave } from '../core/savecode.js';
 import { ICONS, hydrateIcons } from './icons.js';
 import { drawMachine } from '../render/draw.js';
 import { visualTier } from '../core/economy.js';
 
 const $ = (id) => document.getElementById(id);
 const MULTS = [1, 10, -1];
+
+// Yeni oyuncu ipuçları: sırayla/öncelikle gösterilir; done() sağlanınca kalıcı olarak işaretlenir (state.tut).
+const TUTORIAL = [
+  { id: 'level', target: 'btn-level', text: 'Yükselt: makine daha çok kazandırır!',
+    done: (g) => g.state.stats.upgrades > 0,
+    show: (g) => g.canAfford(levelUpCost(MACHINES[g.state.selected], g.state.machines[g.state.selected].level, 1)) },
+  { id: 'auto', target: 'btn-up', text: 'Geliştir → Otomasyon: makine kendi kendine çalışsın!',
+    done: (g) => g.state.machines.some((m) => m.auto),
+    show: (g) => g.canAfford(MACHINES[g.state.selected].autoCost) && !g.state.machines[g.state.selected].auto },
+  { id: 'buy', target: 'btn-buy', text: 'Yeni makine al, fabrikan büyüsün!',
+    done: (g) => g.state.machines.filter((m) => m.owned).length >= 2,
+    show: (g) => g.canBuyMachine(1) && g.canAfford(g.machineCost(1)) },
+  { id: 'quest', target: 'btn-quests', text: 'Görev ödülünü topla!',
+    done: (g) => completedCount(g.state) >= 1,
+    show: (g) => claimableCount(g.state) > 0 },
+  { id: 'zone', target: 'btn-zones', text: 'Yeni bir bölge açabilirsin!',
+    done: (g) => g.state.zones.filter((z) => z.unlocked).length >= 2,
+    show: (g) => { const z = g.nextZoneIndex(); return z >= 0 && g.canUnlockZone(z) && g.canAfford(ZONES[z].unlockCost); } },
+];
 
 function el(tag, cls, html) {
   const e = document.createElement(tag);
@@ -33,7 +54,12 @@ export class UI {
     this.n = {};
     for (const id of ['money', 'money-pill', 'income', 'flevel', 'flevel-bar', 'mc-name', 'mc-lv', 'mc-stats', 'btn-level', 'lvl-cost', 'lvl-lbl',
       'btn-mult', 'btn-buy', 'buy-cost', 'btn-up', 'up-hint', 'btn-quests', 'quest-badge', 'btn-zones', 'btn-settings', 'toast', 'sheet', 'sheet-title',
-      'sheet-body', 'sheet-close', 'backdrop', 'modal', 'zone-prev', 'zone-next', 'btn-daily', 'btn-patent', 'patent-hint', 'stars-chip', 'boost-chip', 'mc-portrait']) this.n[id] = $(id);
+      'sheet-body', 'sheet-close', 'backdrop', 'modal', 'zone-prev', 'zone-next', 'btn-daily', 'btn-patent', 'patent-hint', 'stars-chip', 'boost-chip', 'mc-portrait',
+      'rush', 'rush-name', 'rush-time', 'rush-fill', 'rush-tbar', 'notice', 'coach', 'coach-text', 'app']) this.n[id] = $(id);
+    this.qTab = 'quests';
+    this.noticeQ = [];
+    this.noticeShown = 0;
+    this.coachKey = '';
     this.portT = 0;
     this.po = { color: '#fff', tier: 0, p: 0, t: 0, pulse: 0, auto: false, blocked: false, level: 1 };
     renderer.onCoinArrive = () => this._popMoney();   // uçan jeton para kutusuna varınca küçük zıplama
@@ -79,6 +105,7 @@ export class UI {
     this._press(n['backdrop'], () => this.closeSheet());
     this._press(n['zone-prev'], () => this.stepZone(-1));
     this._press(n['zone-next'], () => this.stepZone(1));
+    this._press(n.rush, () => { if (g.rush) { this.fb.button(); this.goToMachine(g.rush.machine); } });
 
     // Sahneye dokunma: makineye dokun / kilitli yuvayı satın al
     const canvas = this.r.canvas;
@@ -157,8 +184,9 @@ export class UI {
       zones: () => this._buildZones(body),
       settings: () => this._buildSettings(body),
       patent: () => this._buildPatent(body),
+      stats: () => this._buildStats(body),
     };
-    const titles = { upgrades: 'Geliştir', quests: 'Görevler', zones: 'Fabrika Bölgeleri', settings: 'Ayarlar', patent: 'Patent Laboratuvarı' };
+    const titles = { upgrades: 'Geliştir', quests: 'Hedefler', zones: 'Fabrika Bölgeleri', settings: 'Ayarlar', patent: 'Patent Laboratuvarı', stats: 'İstatistikler' };
     n['sheet-title'].textContent = titles[name];
     this.sheet = builders[name]();
     this.sheet.name = name;
@@ -236,7 +264,37 @@ export class UI {
     };
   }
 
+  /** Hedefler paneli: Görevler (merdiven) / Günlük görevler / Rozetler sekmeleri. */
   _buildQuests(body) {
+    const g = this.game;
+    if (claimableCount(g.state) === 0 && g.missionClaimable() > 0) this.qTab = 'daily';
+    const tabs = el('div', 'tabs'), host = el('div', ''), btns = {};
+    for (const [k, label] of [['quests', 'Görevler'], ['daily', 'Günlük'], ['medals', 'Rozetler']]) {
+      const b = el('button', 'tab', label + '<i class="dot" hidden></i>');
+      tabs.append(b); btns[k] = { b, dot: b.querySelector('.dot') };
+      this._press(b, () => { this.qTab = k; this.fb.button(); show(); });
+    }
+    body.append(tabs, host);
+    let sub = null;
+    const show = () => {
+      host.innerHTML = '';
+      sub = this.qTab === 'daily' ? this._buildMissions(host) : this.qTab === 'medals' ? this._buildMedals(host) : this._buildQuestList(host);
+      hydrateIcons(host);
+      for (const k in btns) btns[k].b.classList.toggle('on', k === this.qTab);
+      sub.update();
+    };
+    show();
+    return {
+      update: () => {
+        sub.update();
+        const q = claimableCount(g.state), d = g.missionClaimable();
+        btns.quests.dot.hidden = q === 0; setText(btns.quests.dot, String(q));
+        btns.daily.dot.hidden = d === 0; setText(btns.daily.dot, String(d));
+      },
+    };
+  }
+
+  _buildQuestList(body) {
     const g = this.game;
     const head = el('div', 'divider');
     body.append(head);
@@ -322,14 +380,23 @@ export class UI {
       const t = el('button', 'toggle'); t.setAttribute('role', 'switch');
       row.append(t); body.append(row);
       const sync = () => { t.classList.toggle('on', s[key]); t.setAttribute('aria-checked', String(s[key])); };
-      this._press(t, () => { s[key] = !s[key]; sync(); if (key === 'haptics' && s.haptics) this.fb.vibrate(30); this.fb.button(); this.hooks.save && this.hooks.save(); });
+      this._press(t, () => {
+        s[key] = !s[key]; sync();
+        if (key === 'haptics' && s.haptics) this.fb.vibrate(30);
+        if (key === 'music') this.fb.applyMusicSetting();
+        this.fb.button(); this.hooks.save && this.hooks.save();
+      });
       sync();
     };
     mk('Ses efektleri', 'sound');
+    mk('Müzik', 'music');
     mk('Titreşim', 'haptics');
-    const st = this.game.state.stats;
-    body.append(el('div', 'note', 'Toplam üretilen ürün: ' + formatNum(st.produced) + '<br>Toplam satılan ürün: ' + formatNum(st.sold) + '<br>Çevrimdışı kazanç toplamı: ' + formatNum(st.offlineEarned) +
-      '<br>Çevrimdışı kazanç: en fazla ' + TUNING.offline.capHours + ' saat, %' + Math.round(TUNING.offline.efficiency * 100) + ' verimle.'));
+    const stats = el('button', 'btn btn-blue wide', 'İstatistikler');
+    const code = el('button', 'btn btn-purple wide', 'Kayıt Kodu (Yedekle / Yükle)');
+    body.append(stats, code);
+    this._press(stats, () => { this.fb.button(); this.openSheet('stats'); });
+    this._press(code, () => { this.fb.button(); this.showSaveCode(); });
+    body.append(el('div', 'note', 'Çevrimdışı kazanç: en fazla ' + TUNING.offline.capHours + ' saat, %' + Math.round(TUNING.offline.efficiency * 100) + ' verimle. Kayıt kodu ile ilerlemeni telefon ve bilgisayar arasında taşıyabilirsin.'));
     const reset = el('button', 'btn btn-red wide', 'İlerlemeyi Sıfırla');
     body.append(reset);
     this._press(reset, () => this.confirm('Her şey silinecek!', 'Tüm ilerlemen kalıcı olarak silinir. Emin misin?', 'Evet, sıfırla', () => this.hooks.reset && this.hooks.reset()));
@@ -395,6 +462,221 @@ export class UI {
         }
       },
     };
+  }
+
+  /** Günlük görevler sekmesi. */
+  _buildMissions(body) {
+    const g = this.game;
+    const head = el('div', 'divider');
+    const list = el('div', '');
+    body.append(head, list);
+    const chest = el('div', 'row chest', `<div class="ri" data-icon="gift"></div><div class="rm"><div class="rt">Günün Sandığı</div><div class="rs"></div><div class="prog"><i></i></div></div>`);
+    const cbtn = el('button', 'btn btn-gold', '<span class="lbl">AÇ</span><span class="cost"><span class="ico sm" data-icon="coin"></span><i></i></span>');
+    chest.append(cbtn); body.append(chest);
+    this._press(cbtn, () => {
+      if (!this._guard()) return;
+      const got = g.claimChest();
+      if (got > 0) { this.update(); }
+    });
+    let key = '', rows = [];
+    const build = () => {
+      list.innerHTML = ''; rows = [];
+      for (const m of g.missions()) {
+        const row = el('div', 'row');
+        row.innerHTML = `<div class="ri" data-icon="target"></div><div class="rm"><div class="rt"></div><div class="rs"></div><div class="prog"><i></i></div></div>`;
+        const btn = el('button', 'btn btn-green', '<span class="lbl">AL</span><span class="cost"><span class="ico sm" data-icon="coin"></span><i></i></span>');
+        row.append(btn); list.append(row);
+        this._press(btn, () => {
+          if (!this._guard()) return;
+          const got = g.claimMission(m.idx);
+          if (got > 0) { this.toast('+' + formatNum(got) + ' kazandın!'); this.update(); }
+        });
+        rows.push({ idx: m.idx, row, btn, rt: row.querySelector('.rt'), rs: row.querySelector('.rs'), bar: row.querySelector('.prog i'), cost: btn.querySelector('.cost i'), ico: row.querySelector('.ri') });
+      }
+      hydrateIcons(list);
+    };
+    return {
+      update: () => {
+        const k = g.state.dm.day + g.state.dm.list.map((m) => m.id + m.target).join();
+        if (k !== key) { key = k; build(); }
+        const now = new Date(), next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const done = g.missions().filter((m) => m.claimed).length;
+        setText(head, 'Günlük görevler  ·  ' + formatDuration((next - now) / 1000) + ' kaldı');
+        const ms = g.missions();
+        for (const R of rows) {
+          const m = ms[R.idx];
+          setText(R.rt, m.text);
+          setText(R.rs, m.claimed ? 'Ödül alındı' : formatNum(m.progress) + ' / ' + formatNum(m.target));
+          R.bar.style.width = (m.progress / m.target * 100).toFixed(1) + '%';
+          R.row.classList.toggle('ready', m.done && !m.claimed);
+          R.row.classList.toggle('done', m.claimed);
+          R.btn.hidden = !m.done || m.claimed;
+          if (!R.btn.hidden) setText(R.cost, formatNum(m.reward));
+        }
+        const dm = g.state.dm, ready = g.chestReady();
+        setText(chest.querySelector('.rs'), dm.chest ? 'Bugünkü sandık açıldı' : done + ' / ' + MISSIONS.count + ' görevi bitirince açılır');
+        chest.querySelector('.prog i').style.width = (done / MISSIONS.count * 100).toFixed(1) + '%';
+        chest.classList.toggle('ready', ready); chest.classList.toggle('done', dm.chest);
+        cbtn.hidden = !ready;
+        if (ready) setText(cbtn.querySelector('.cost i'), formatNum(g.chestReward()));
+      },
+    };
+  }
+
+  /** Rozetler sekmesi: kazanılanlar kalıcı gelir bonusu verir. */
+  _buildMedals(body) {
+    const g = this.game, s = g.state;
+    const head = el('div', 'divider');
+    const list = el('div', '');
+    body.append(head, list);
+    let key = -1, rows = [];
+    const build = () => {
+      list.innerHTML = ''; rows = [];
+      const order = ACHIEVEMENTS.slice().sort((a, b) => (achDone(s, a) ? 1 : 0) - (achDone(s, b) ? 1 : 0) || achProgress(s, b) / b.target - achProgress(s, a) / a.target);
+      for (const a of order) {
+        const have = achDone(s, a);
+        const row = el('div', 'row' + (have ? ' done' : ''));
+        row.innerHTML = `<div class="ri medal medal-${a.tier}${have ? '' : ' off'}" data-icon="medal"></div><div class="rm"><div class="rt">${a.title}</div><div class="rs">${a.desc}</div>${have ? '' : '<div class="prog"><i></i></div>'}</div>${have ? '<div class="ri sm" data-icon="check"></div>' : '<div class="pct"></div>'}`;
+        list.append(row);
+        rows.push({ a, have, bar: row.querySelector('.prog i'), pct: row.querySelector('.pct') });
+      }
+      hydrateIcons(list);
+    };
+    return {
+      update: () => {
+        const n = achCount(s);
+        if (n !== key) { key = n; build(); }
+        setText(head, 'Rozetler ' + n + '/' + ACHIEVEMENTS.length + '  ·  Gelir bonusu +%' + Math.round(n * ACH_BONUS * 100));
+        for (const R of rows) {
+          if (R.have) continue;
+          const f = achProgress(s, R.a) / R.a.target;
+          R.bar.style.width = (f * 100).toFixed(1) + '%';
+          setText(R.pct, Math.floor(f * 100) + '%');
+        }
+      },
+    };
+  }
+
+  _buildStats(body) {
+    const g = this.game, s = g.state, st = s.stats;
+    const owned = () => s.machines.filter((m) => m.owned).length;
+    const defs = [
+      ['Oynama süresi', () => formatDuration(st.playSecs)],
+      ['Fabrika seviyesi', () => String(factoryLevel(s).level)],
+      ['Üretilen ürün', () => formatNum(st.produced)],
+      ['Satılan ürün', () => formatNum(st.sold)],
+      ['Toplam kazanç', () => formatNum(st.earned)],
+      ['Bu koşudaki kazanç', () => formatNum(st.runEarned)],
+      ['En yüksek gelir', () => formatRate(st.maxIncome) + '/sn'],
+      ['Dokunuş', () => formatNum(st.taps)],
+      ['Yükseltme', () => formatNum(st.upgrades)],
+      ['Makineler', () => owned() + '/' + MACHINES.length],
+      ['Bölgeler', () => s.zones.filter((z) => z.unlocked).length + '/' + ZONES.length],
+      ['Altın Kasa', () => formatNum(st.golden)],
+      ['Acil Sipariş', () => formatNum(st.rushDone)],
+      ['Günlük görev', () => formatNum(st.missionsDone)],
+      ['Rozetler', () => achCount(s) + '/' + ACHIEVEMENTS.length],
+      ['Yenileme  /  Patent Yıldızı', () => s.meta.prestiges + '  /  ' + formatNum(s.meta.totalStars)],
+      ['Çevrimdışı kazanç', () => formatNum(st.offlineEarned)],
+      ['Başlangıç', () => new Date(s.createdAt).toLocaleDateString('tr-TR')],
+    ];
+    const cells = defs.map(([label, fn]) => {
+      const row = el('div', 'stat-row', `<span>${label}</span><b></b>`);
+      body.append(row);
+      return { fn, v: row.querySelector('b') };
+    });
+    return { update: () => { for (const c of cells) setText(c.v, c.fn()); } };
+  }
+
+  // ----------------------------------------------------------- kayıt kodu
+  showSaveCode() {
+    this.hooks.save && this.hooks.save();
+    const code = encodeSave(this.game.state);
+    const c = this._modal(`<h3>Kayıt Kodu</h3><p>Bu kodu kopyala. Başka bir cihazda “Kodu Yükle” ile ilerlemeni aktarabilirsin.</p>
+      <textarea class="code-box" readonly rows="4" spellcheck="false"></textarea>
+      <div class="btns"><button class="btn btn-blue half" data-x="copy">Kopyala</button><button class="btn btn-purple half" data-x="load">Kodu Yükle</button></div>
+      <button class="btn btn-green" data-x="ok">Kapat</button>`);
+    const box = c.querySelector('textarea');
+    box.value = code;
+    c.querySelector('[data-x=ok]').onclick = () => this.closeModal();
+    c.querySelector('[data-x=load]').onclick = () => this.showLoadCode();
+    c.querySelector('[data-x=copy]').onclick = () => {
+      const done = () => this.toast('Kopyalandı!');
+      const fallback = () => { box.focus(); box.select(); try { document.execCommand('copy') ? done() : this.toast('Kodu elle seçip kopyala'); } catch (e) { this.toast('Kodu elle seçip kopyala'); } };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, fallback); else fallback();
+    };
+  }
+
+  showLoadCode() {
+    const c = this._modal(`<h3>Kodu Yükle</h3><p>Başka cihazdan aldığın kayıt kodunu yapıştır. Mevcut ilerlemenin üzerine yazılır.</p>
+      <textarea class="code-box" rows="4" spellcheck="false" placeholder="MF1...."></textarea>
+      <div class="btns"><button class="btn btn-blue half" data-x="no">Vazgeç</button><button class="btn btn-red half" data-x="ok">Yükle</button></div>`);
+    const box = c.querySelector('textarea');
+    c.querySelector('[data-x=no]').onclick = () => this.closeModal();
+    c.querySelector('[data-x=ok]').onclick = () => {
+      const res = decodeSave(box.value);
+      if (!res.ok) { this.fb.deny(); this.toast(res.error === 'checksum' ? 'Kod eksik ya da bozuk' : 'Geçersiz kayıt kodu'); return; }
+      this.confirm('İlerlemenin üzerine yazılsın?', 'Şu anki ilerlemen silinir ve koddaki kayıt yüklenir.', 'Yükle', () => this.hooks.importState && this.hooks.importState(res.state));
+    };
+  }
+
+  // ------------------------------------------------------------ bildirimler
+  /** Alt kısımda kayan kart (rozet, görev, sipariş). En fazla 2 kart görünür, fazlası sıraya girer. */
+  notify(icon, title, sub, cls = '') {
+    this.noticeQ.push({ icon, title, sub, cls });
+    if (this.noticeQ.length > 5) this.noticeQ.shift();
+    this._drainNotices();
+  }
+
+  _drainNotices() {
+    while (this.noticeShown < 2 && this.noticeQ.length) {
+      const n = this.noticeQ.shift();
+      const item = el('div', 'notice-item ' + n.cls, `<div class="n-ico ${n.cls}" data-icon="${n.icon}"></div><div><div class="n-t"></div><div class="n-s"></div></div>`);
+      item.querySelector('.n-t').textContent = n.title; item.querySelector('.n-s').textContent = n.sub;
+      hydrateIcons(item);
+      this.n.notice.append(item);
+      this.noticeShown++;
+      setTimeout(() => {
+        item.classList.add('out');
+        setTimeout(() => { item.remove(); this.noticeShown--; this._drainNotices(); }, 320);
+      }, 2800);
+    }
+  }
+
+  /** Banttaki Acil Sipariş makinesine git (bölgeyi değiştirir, makineyi seçer). */
+  goToMachine(i) {
+    this.closeSheet(true);
+    const z = MACHINES[i].zone;
+    if (this.game.state.zones[z].unlocked && z !== this.r.zone) this.r.setZone(z);
+    this.game.select(i);
+    this.update();
+  }
+
+  // ----------------------------------------------------------------- ipuçları
+  /** İlk dakikalarda ilgili düğmenin üstünde küçük bir ipucu balonu gösterir. */
+  _coach() {
+    const g = this.game, s = g.state, c = this.n.coach;
+    let cur = null;
+    for (const st of TUTORIAL) {
+      if (s.tut[st.id]) continue;
+      if (st.done(g)) { s.tut[st.id] = true; continue; }
+      if (!cur && st.show(g)) cur = st;
+    }
+    const target = cur && this.n[cur.target];
+    const blocked = this.sheet || !this.n.modal.hidden || document.getElementById('splash');
+    if (!cur || blocked || !target || target.hidden) { if (!c.hidden) { c.hidden = true; this.coachKey = ''; } return; }
+    const app = this.n.app.getBoundingClientRect(), r = target.getBoundingClientRect();
+    const tx = r.left + r.width / 2 - app.left;
+    if (c.hidden) c.hidden = false;
+    setText(this.n['coach-text'], cur.text);
+    const half = Math.min(this.n['coach-text'].offsetWidth / 2, app.width / 2 - 8) || 90;
+    const cx = Math.max(half + 8, Math.min(app.width - half - 8, tx));
+    const key = cur.id + '|' + Math.round(cx) + '|' + Math.round(app.bottom - r.top);
+    if (key === this.coachKey) return;
+    this.coachKey = key;
+    c.style.left = cx.toFixed(0) + 'px';
+    c.style.bottom = (app.bottom - r.top + 12).toFixed(0) + 'px';
+    c.style.setProperty('--ax', (half + tx - cx).toFixed(0) + 'px');
   }
 
   /** Dock'taki seçili makine portresi (canlı: ilerleme ve efektler oynar). */
@@ -558,8 +840,20 @@ export class UI {
     const want = pOpen ? 'star' : 'lock';
     if (pIcon.dataset.icon !== want) { pIcon.dataset.icon = want; pIcon.innerHTML = ICONS[want]; }
 
-    const claimable = claimableCount(s);
+    const claimable = claimableCount(s) + g.missionClaimable();
     n['quest-badge'].hidden = claimable === 0; setText(n['quest-badge'], String(claimable));
+
+    // Acil Sipariş bandı
+    const rush = g.rush;
+    n.rush.hidden = !rush;
+    if (rush) {
+      setText(n['rush-name'], MACHINES[rush.machine].name + '  ' + rush.got + '/' + rush.target);
+      setText(n['rush-time'], Math.ceil(rush.ttl) + ' sn');
+      n['rush-fill'].style.width = Math.min(100, rush.got / rush.target * 100).toFixed(1) + '%';
+      n['rush-tbar'].style.width = Math.max(0, rush.ttl / rush.max * 100).toFixed(1) + '%';
+      n.rush.classList.toggle('urgent', rush.ttl < 8);
+    }
+    this._coach();
 
     // bölge okları
     const un = this.zoneUnlocked(), z = this.r.zone;

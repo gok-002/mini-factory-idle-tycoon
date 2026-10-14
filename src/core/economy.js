@@ -1,5 +1,5 @@
 // Saf (UI'dan bağımsız) ekonomi formülleri. Denge testleri bu dosyaya karşı yazılır.
-import { TUNING, UPGRADES, MACHINES, ZONES, PRESTIGE, PATENTS } from './config.js';
+import { TUNING, UPGRADES, MACHINES, ZONES, PRESTIGE, PATENTS, ACH_BONUS } from './config.js';
 
 export function milestoneCount(level) {
   let c = 0;
@@ -27,6 +27,13 @@ export function storageCap(m) {
 /** Otomatik makinenin kararlı durumdaki ürün/sn değeri (bant dolarsa yavaşlar). */
 export function throughput(def, m) {
   return Math.min(1 / cycleTime(def, m), storageCap(m) / TUNING.beltTravelTime);
+}
+
+/** Otomatik makinelerin toplam ürün/sn değeri (günlük görev hedeflerini ölçeklemek için). */
+export function itemsPerSec(state) {
+  let sum = 0;
+  for (let i = 0; i < MACHINES.length; i++) if (state.machines[i].owned && state.machines[i].auto) sum += throughput(MACHINES[i], state.machines[i]);
+  return Number.isFinite(sum) ? sum : 0;
 }
 
 export function machineIncome(def, m, gm = 1) {
@@ -105,9 +112,18 @@ export function starMult(state) {
   return 1 + PRESTIGE.starBonus * state.meta.totalStars;
 }
 
-/** Kalıcı çarpan: Patent Yıldızları + "Mühendislik Ödülü". Çevrimdışı kazanca da uygulanır. */
+export function achCount(state) {
+  return Object.keys(state.ach).length;
+}
+
+/** Rozet bonusu: kazanılan her rozet için kalıcı +ACH_BONUS. */
+export function achMult(state) {
+  return 1 + ACH_BONUS * achCount(state);
+}
+
+/** Kalıcı çarpan: Patent Yıldızları + "Mühendislik Ödülü" + rozetler. Çevrimdışı kazanca da uygulanır. */
 export function permMult(state) {
-  return starMult(state) * (1 + 0.2 * patentLvl(state, 'income'));
+  return starMult(state) * (1 + 0.2 * patentLvl(state, 'income')) * achMult(state);
 }
 
 /** Kalıcı çarpan x geçici bonuslar (altın kasa coşkusu, ileride ödüllü reklam). */

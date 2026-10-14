@@ -3,7 +3,7 @@
 
 import { formatNum } from './format.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const SAVE_KEY = 'miniFactory.save';
 
 export const TUNING = {
@@ -184,6 +184,75 @@ export const GOLDEN = {
 
 // Günlük hediye: gelirin kaç saniyesi (7. gün + 1 Yıldız).
 export const DAILY = { secs: [300, 600, 900, 1200, 1800, 2700, 7200], minMoney: 500, starsOnLastDay: 1 };
+
+// ---------------------------------------------------------------- Rozetler (başarımlar)
+// Her rozet kalıcıdır, ödül olarak gelire ACH_BONUS kadar kalıcı çarpan ekler (yeniden doğuşta korunur).
+export const ACH_BONUS = 0.01;
+const ACH_DESC = {
+  produced:     (n) => `${formatNum(n)} ürün üret`,
+  taps:         (n) => `${formatNum(n)} kez dokun`,
+  sold:         (n) => `Toplam ${formatNum(n)} ürün sat`,
+  earned:       (n) => `Toplam ${formatNum(n)} kazan`,
+  upgrades:     (n) => `${formatNum(n)} yükseltme satın al`,
+  automations:  (n) => `${n} makineyi otomatikleştir`,
+  machines:     (n) => `${n} makine kur`,
+  zones:        (n) => `${n} bölge aç`,
+  maxIncome:    (n) => `Saniyelik geliri ${formatNum(n)} yap`,
+  maxLevel:     (n) => `Bir makineyi Sv.${n} yap`,
+  golden:       (n) => `${n} Altın Kasa yakala`,
+  prestiges:    (n) => `Fabrikayı ${n} kez yenile`,
+  totalStars:   (n) => `Toplam ${formatNum(n)} Patent Yıldızı kazan`,
+  rushDone:     (n) => `${n} Acil Sipariş tamamla`,
+  missionsDone: (n) => `${n} günlük görev tamamla`,
+  dailyStreak:  (n) => `Günlük hediyede ${n} günlük seri yap`,
+};
+export const ACHIEVEMENTS = [];
+const A = (metric, rungs) => rungs.forEach(([target, id, title], k) => ACHIEVEMENTS.push({
+  id, metric, target, title, series: metric, tier: Math.min(3, k), desc: ACH_DESC[metric](target),
+}));
+A('produced',     [[1, 'a_prod1', 'İlk Parça'], [1e4, 'a_prod2', 'Seri Üretim'], [1e6, 'a_prod3', 'Fabrika Ruhu']]);
+A('taps',         [[100, 'a_tap1', 'Parmak Isınması'], [2000, 'a_tap2', 'Tıkır Tıkır'], [20000, 'a_tap3', 'Çelik Parmaklar']]);
+A('sold',         [[500, 'a_sold1', 'Tezgahtar'], [5e4, 'a_sold2', 'Toptancı'], [5e6, 'a_sold3', 'Ticaret İmparatoru']]);
+A('earned',       [[1e3, 'a_earn1', 'Harçlık'], [1e6, 'a_earn2', 'Milyoner'], [1e9, 'a_earn3', 'Milyarder'], [1e12, 'a_earn4', 'Trilyoner'], [1e15, 'a_earn5', 'Servet Avcısı'], [1e21, 'a_earn6', 'Evren Zengini']]);
+A('upgrades',     [[25, 'a_upg1', 'Çırak'], [250, 'a_upg2', 'Kalfa'], [2000, 'a_upg3', 'Usta']]);
+A('automations',  [[3, 'a_auto1', 'Otomasyon Merakı'], [12, 'a_auto2', 'Robot Ordusu'], [24, 'a_auto3', 'Tam Otomasyon']]);
+A('machines',     [[3, 'a_mach1', 'Küçük Girişim'], [12, 'a_mach2', 'Büyüyen İş'], [24, 'a_mach3', 'Fabrika Patronu']]);
+A('zones',        [[2, 'a_zone1', 'Yeni Ufuklar'], [4, 'a_zone2', 'Ay Yolcusu'], [8, 'a_zone3', 'Evren Gezgini']]);
+A('maxIncome',    [[1e3, 'a_inc1', 'Akan Para'], [1e6, 'a_inc2', 'Para Yağmuru'], [1e12, 'a_inc3', 'Altın Nehir'], [1e18, 'a_inc4', 'Sonsuz Kaynak']]);
+A('maxLevel',     [[25, 'a_lvl1', 'Usta Mühendis'], [100, 'a_lvl2', 'Yüzlük'], [250, 'a_lvl3', 'Mühendis Dehası']]);
+A('golden',       [[3, 'a_gold1', 'Şanslı'], [25, 'a_gold2', 'Hazine Avcısı'], [100, 'a_gold3', 'Altın Çağ']]);
+A('prestiges',    [[1, 'a_pres1', 'Yeniden Doğuş'], [5, 'a_pres2', 'Bitmeyen Döngü'], [20, 'a_pres3', 'Fabrika Anka Kuşu']]);
+A('totalStars',   [[5, 'a_star1', 'Yıldız Tozu'], [50, 'a_star2', 'Takım Yıldızı'], [500, 'a_star3', 'Samanyolu']]);
+A('rushDone',     [[1, 'a_rush1', 'Acil Servis'], [10, 'a_rush2', 'Hızlı Teslimat'], [50, 'a_rush3', 'Kurye Efsanesi']]);
+A('missionsDone', [[3, 'a_msn1', 'Görev Adamı'], [30, 'a_msn2', 'Düzenli Çalışan'], [150, 'a_msn3', 'Vardiya Şefi']]);
+A('dailyStreak',  [[7, 'a_streak', 'Sadık Çalışan']]);
+
+// ---------------------------------------------------------------- Günlük görevler
+// Her gün (yerel takvim günü) havuzdan 3 görev seçilir; hepsi bitince sandık açılır.
+// lo/hi: hedef aralığı. rate: hedef, mevcut üretim/gelirin 15 dakikalık karşılığı olarak ölçeklenir. needs: 'rush' -> Acil Sipariş açıkken, 'income' -> geliri olan oyuncuya (Altın Kasa yalnızca gelirle belirir).
+export const MISSIONS = {
+  count: 3, rateWindow: 900, chestSecs: 1500, chestMin: 3000,
+  pool: [
+    { id: 'tap',  metric: 'taps',     text: (n) => `${formatNum(n)} kez dokun`,          lo: 150, hi: 350, secs: 240, min: 300 },
+    { id: 'upg',  metric: 'upgrades', text: (n) => `${n} yükseltme yap`,                lo: 5, hi: 12, secs: 300, min: 400 },
+    { id: 'gold', metric: 'golden',   text: (n) => `${n} Altın Kasa yakala`,            lo: 1, hi: 3, secs: 300, min: 400, needs: 'income' },
+    { id: 'rush', metric: 'rushDone', text: (n) => `${n} Acil Sipariş tamamla`,         lo: 1, hi: 2, secs: 420, min: 600, needs: 'rush' },
+    { id: 'sell', metric: 'sold',     text: (n) => `${formatNum(n)} ürün sat`,          rate: 'items', floor: 40, secs: 240, min: 300 },
+    { id: 'earn', metric: 'earned',   text: (n) => `${formatNum(n)} kazan`,             rate: 'income', floor: 2000, secs: 240, min: 300 },
+  ],
+};
+
+// ---------------------------------------------------------------- Acil Sipariş
+// Bir müşteri belirli bir makinenin ürününden kısa sürede N adet ister (aktif oyun için bonus; yok sayılabilir).
+export const RUSH = {
+  minSold: 150, minMachines: 2,
+  ttl: 30,                          // sipariş süresi (sn)
+  firstMin: 150, firstMax: 240,     // ilk siparişe kadar (sn)
+  gapMin: 240, gapMax: 420,         // sonraki siparişe kadar (sn)
+  factor: 1.8,                      // hedef = normal üretimin kaç katı
+  minTarget: 3,
+  rewardSecs: 100, rewardMin: 500,  // ödül = max(rewardMin, gelir x rewardSecs, ürün değeri x hedef x 3)
+};
 
 export const THEMES = {
   classic: { name: 'Klasik' }, // kozmetik temalar için ayrılmış yer (bkz. docs/MONETIZATION.md)

@@ -1,16 +1,21 @@
-import { SAVE_VERSION, TUNING, MACHINES, ZONES, QUESTS, UPGRADES, PATENTS } from './config.js';
+import { SAVE_VERSION, TUNING, MACHINES, ZONES, QUESTS, UPGRADES, PATENTS, ACHIEVEMENTS, MISSIONS } from './config.js';
+
+export const TUTORIAL_STEPS = ['level', 'auto', 'buy', 'quest', 'zone'];
 
 export function createDefaultState(now = Date.now()) {
   return {
     v: SAVE_VERSION,
     money: TUNING.startMoney,
-    stats: { produced: 0, sold: 0, earned: 0, upgrades: 0, maxIncome: 0, taps: 0, offlineEarned: 0, runEarned: 0, golden: 0 },
+    stats: { produced: 0, sold: 0, earned: 0, upgrades: 0, maxIncome: 0, taps: 0, offlineEarned: 0, runEarned: 0, golden: 0, rushDone: 0, missionsDone: 0, playSecs: 0 },
     meta: { stars: 0, totalStars: 0, prestiges: 0, shop: {} },   // kalıcı (yeniden doğuşta korunur)
     daily: { last: '', streak: 0 },
+    ach: {},                          // { [rozetId]: true } kalıcı rozetler (yeniden doğuşta korunur)
+    dm: { day: '', list: [], chest: false },   // günlük görevler: [{ id, target, base, claimed }]
+    tut: {},                          // gösterilmiş ipuçları { [adım]: true }
     machines: MACHINES.map((d, i) => ({ id: d.id, owned: i === 0, level: 1, speed: 0, value: 0, storage: 0, auto: false })),
     zones: ZONES.map((z) => ({ id: z.id, unlocked: z.unlockCost === 0 })),
     quests: {},                       // { [questId]: true } -> ödülü alındı
-    settings: { sound: true, haptics: true },
+    settings: { sound: true, haptics: true, music: true },
     theme: 'classic',
     boosts: [],                       // [{ id, mult, until }] geçici bonuslar (ödüllü reklam vb. için ayrılmış)
     selected: 0,
@@ -59,6 +64,7 @@ export function sanitizeState(raw, now = Date.now()) {
   if (raw.settings && typeof raw.settings === 'object') {
     s.settings.sound = raw.settings.sound !== false;
     s.settings.haptics = raw.settings.haptics !== false;
+    s.settings.music = raw.settings.music !== false;
   }
   const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
   s.meta.stars = num(meta.stars, 0, 0, 1e15);
@@ -69,6 +75,18 @@ export function sanitizeState(raw, now = Date.now()) {
   const d = raw.daily && typeof raw.daily === 'object' ? raw.daily : {};
   s.daily.last = typeof d.last === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.last) ? d.last : '';
   s.daily.streak = int(d.streak, 0, 0, 7);
+  if (raw.ach && typeof raw.ach === 'object') for (const a of ACHIEVEMENTS) if (raw.ach[a.id] === true) s.ach[a.id] = true;
+  if (raw.tut && typeof raw.tut === 'object') for (const k of TUTORIAL_STEPS) if (raw.tut[k] === true) s.tut[k] = true;
+  const dm = raw.dm && typeof raw.dm === 'object' ? raw.dm : {};
+  if (typeof dm.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dm.day) && Array.isArray(dm.list)) {
+    const list = [];
+    for (const it of dm.list.slice(0, MISSIONS.count)) {
+      const def = it && MISSIONS.pool.find((p) => p.id === it.id);
+      if (!def || list.some((x) => x.id === def.id)) continue;
+      list.push({ id: def.id, target: Math.max(1, num(it.target, 1, 1, 1e30)), base: num(it.base, 0, 0, Number.MAX_VALUE), claimed: it.claimed === true });
+    }
+    if (list.length === MISSIONS.count) { s.dm.day = dm.day; s.dm.list = list; s.dm.chest = dm.chest === true; }   // bozuksa yarın/yenilemede yeniden üretilir
+  }
   if (typeof raw.theme === 'string') s.theme = raw.theme;
   if (Array.isArray(raw.boosts)) {
     s.boosts = raw.boosts

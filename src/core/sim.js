@@ -1,12 +1,13 @@
 // Merkezi üretim simülasyonu + tüm satın alma/yükseltme kuralları. Görsel koddan bağımsızdır.
-import { TUNING, UPGRADES, MACHINES, ZONES, QUESTS, PRESTIGE, PATENTS, GOLDEN, DAILY, machineReq } from './config.js';
+import { TUNING, UPGRADES, MACHINES, ZONES, QUESTS, PRESTIGE, PATENTS, GOLDEN, DAILY, RUSH, MISSIONS, machineReq } from './config.js';
 import {
   cycleTime, itemValue, storageCap, incomePerSec, levelUpCost, maxAffordableLevels,
-  trackCost, trackMaxed, globalMult, tapSeconds, machineBuyCost, goldenIntervalMult, patentCost, patentLvl, prestigeGain, prestigeUnlocked,
+  trackCost, trackMaxed, globalMult, tapSeconds, machineBuyCost, goldenIntervalMult, patentCost, patentLvl, prestigeGain, prestigeUnlocked, itemsPerSec,
 } from './economy.js';
 import { createDefaultState } from './state.js';
 import { computeOffline } from './offline.js';
-import { questDone, questClaimed, questReward } from './quests.js';
+import { questDone, questClaimed, questReward, METRICS } from './quests.js';
+import { achEarnable } from './achievements.js';
 
 const noop = () => {};
 
@@ -17,6 +18,20 @@ export function dayKey(ms) {
 }
 const yesterdayKey = (ms) => { const d = new Date(ms); d.setDate(d.getDate() - 1); return dayKey(d.getTime()); };
 
+/** Gün anahtarından deterministik rastgele akışı (aynı gün = aynı görevler; oyunun rng'sinden bağımsız). */
+function dayRng(key) {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let a = h >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/** 2 anlamlı basamağa yuvarlar (görev hedefleri okunaklı olsun). */
+function nice(x) {
+  if (!(x >= 10)) return Math.max(1, Math.round(x));
+  const p = Math.pow(10, Math.floor(Math.log10(x)) - 1);
+  return Math.round(x / p) * p;
+}
+
 function makeRuntime() {
   // Çalışma zamanı (kaydedilmez): üretim ilerlemesi ve banttaki ürün yaşları.
   return { progress: 0, count: 0, ages: new Float64Array(TUNING.maxStorage + 1), blocked: false, pulse: 0, born: 1 };
@@ -26,30 +41,42 @@ export class Game {
   /**
    * @param {object} state sanitizeState çıktısı
    * @param {(type: string, a?: any, b?: any, c?: any) => void} emit olay bildirimi (UI/ses/efekt)
+   * @param {() => number} [clock] şimdiki zaman (ms); testlerde sabitlenir
    */
-  constructor(state, emit = noop, rng = Math.random) {
+  constructor(state, emit = noop, rng = Math.random, clock = () => Date.now()) {
     this.state = state;
     this.emit = emit;
     this.rng = rng;
+    this.now = clock;               // saat kaynağı (testlerde değiştirilebilir)
     this.golden = null;             // { x, y, ttl, max }: sahne üzerinde 0..1 konumu
     this.goldenTimer = 45 + rng() * 30;
     this.rt = MACHINES.map(makeRuntime);
     this.gm = 1;
     this.income = 0;
     this.readyQuests = new Set();
+    this.readyMissions = new Set();
+    this.rush = null;               // { machine, target, got, ttl, max }: aktif Acil Sipariş
+    this.rushTimer = RUSH.firstMin + rng() * (RUSH.firstMax - RUSH.firstMin);
+    this.backfilled = 0;            // yüklemede sessizce verilen rozet sayısı
     this._patentOpen = prestigeUnlocked(state);    // Patent Laboratuvarı zaten açıksa açılış bildirimi verme
-    this.refresh(Date.now());
+    this.backfilled = this._checkAch(true);
+    this._silent = true;            // yüklemede mevcut durum için bildirim yağmuru olmasın
+    this.refresh();
+    this._silent = false;
     for (const q of QUESTS) if (questDone(state, q) && !questClaimed(state, q)) this.readyQuests.add(q.id);
   }
 
   /** Türetilmiş değerleri yeniden hesaplar (satın alma / yükseltme / saniyede birkaç kez). */
-  refresh(nowMs = Date.now()) {
+  refresh(nowMs = this.now()) {
     const s = this.state;
     this.gm = globalMult(s, nowMs);
     this.income = incomePerSec(s, this.gm);
     if (this.income > s.stats.maxIncome) s.stats.maxIncome = this.income;
+    if (this._checkAch(false) > 0) { this.gm = globalMult(s, nowMs); this.income = incomePerSec(s, this.gm); }   // yeni rozet çarpanı hemen işler
     if (!this._patentOpen && prestigeUnlocked(s)) { this._patentOpen = true; this.emit('patentUnlocked'); }
+    this._ensureMissions(nowMs);
     this._checkQuests();
+    this._checkMissions();
   }
 
   /** Her karede çağrılır; son görülme zamanını güncel tutar (çevrimdışı hesabın doğruluğu için). */
@@ -77,7 +104,9 @@ export class Game {
     if (!(dt > 0)) return;
     if (dt > TUNING.maxFrameDt) dt = TUNING.maxFrameDt;
     const s = this.state;
+    s.stats.playSecs += dt;
     this._goldenTick(dt);
+    this._rushTick(dt);
     for (let i = 0; i < MACHINES.length; i++) {
       const m = s.machines[i];
       if (!m.owned) continue;
@@ -127,6 +156,7 @@ export class Game {
     this._earn(amount);
     this.state.stats.sold += count;
     this.emit('sell', i, amount, count);
+    if (this.rush && this.rush.machine === i) this._rushSold(count);
     this._checkQuests();
   }
 
@@ -344,6 +374,147 @@ export class Game {
     return { money, stars, day: st.day };
   }
 
+  // ------------------------------------------------------------------ rozetler
+  /** Şartı sağlanan rozetleri verir; kaç tane verildiğini döndürür. silent: yüklemede bildirim yok. */
+  _checkAch(silent) {
+    const list = achEarnable(this.state);
+    for (const a of list) {
+      this.state.ach[a.id] = true;
+      if (!silent) this.emit('achievement', a.id);
+    }
+    return list.length;
+  }
+
+  // ----------------------------------------------------------- günlük görevler
+  /** Gün değiştiyse (ya da hiç yoksa) bugünün 3 görevini üretir; aynı gün aynı görevler çıkar. */
+  _ensureMissions(nowMs) {
+    const dm = this.state.dm, key = dayKey(nowMs);
+    if (dm.day === key && dm.list.length === MISSIONS.count) return;
+    const rnd = dayRng(key), s = this.state;
+    const open = this._rushOpen();
+    const pool = MISSIONS.pool.filter((p) => !p.needs || (p.needs === 'rush' && open) || (p.needs === 'income' && this.income > 0));
+    const list = [];
+    while (list.length < MISSIONS.count && pool.length) {
+      const p = pool.splice(Math.floor(rnd() * pool.length), 1)[0];
+      let target;
+      if (p.rate === 'items') target = nice(Math.max(p.floor, itemsPerSec(s) * MISSIONS.rateWindow));
+      else if (p.rate === 'income') target = nice(Math.max(p.floor, this.income * MISSIONS.rateWindow));
+      else target = p.lo + Math.floor(rnd() * (p.hi - p.lo + 1));
+      list.push({ id: p.id, target, base: METRICS[p.metric](s), claimed: false });
+    }
+    dm.day = key; dm.list = list; dm.chest = false;
+    this.readyMissions.clear();
+  }
+
+  missionReward(def) { return Math.floor(Math.max(def.min, def.secs * this.income)); }
+  chestReward() { return Math.floor(Math.max(MISSIONS.chestMin, MISSIONS.chestSecs * this.income)); }
+
+  /** Arayüz için bugünün görevleri. */
+  missions() {
+    const s = this.state;
+    return s.dm.list.map((m, idx) => {
+      const def = MISSIONS.pool.find((p) => p.id === m.id);
+      const progress = Math.max(0, Math.min(m.target, METRICS[def.metric](s) - m.base));
+      return { idx, id: m.id, text: def.text(m.target), target: m.target, progress, done: progress >= m.target, claimed: m.claimed, reward: this.missionReward(def) };
+    });
+  }
+
+  chestReady() {
+    const dm = this.state.dm;
+    return !dm.chest && dm.list.length === MISSIONS.count && dm.list.every((m) => m.claimed);
+  }
+
+  /** Alınabilir görev ödülü sayısı (+ sandık). */
+  missionClaimable() {
+    return this.missions().filter((m) => m.done && !m.claimed).length + (this.chestReady() ? 1 : 0);
+  }
+
+  _checkMissions() {
+    for (const m of this.missions()) {
+      if (m.done && !m.claimed && !this.readyMissions.has(m.idx)) { this.readyMissions.add(m.idx); if (!this._silent) this.emit('missionReady', m.idx); }
+    }
+  }
+
+  /** Ödül yalnızca bir kez: önce "alındı" işaretlenir, sonra para eklenir. */
+  claimMission(idx) {
+    const info = this.missions()[idx];
+    if (!info || info.claimed || !info.done) return 0;
+    this.state.dm.list[idx].claimed = true;
+    this.readyMissions.delete(idx);
+    this._earn(info.reward);
+    this.state.stats.missionsDone++;
+    this.emit('missionClaimed', idx, info.reward);
+    this.refresh();
+    return info.reward;
+  }
+
+  claimChest() {
+    if (!this.chestReady()) return 0;
+    this.state.dm.chest = true;
+    const reward = this.chestReward();
+    this._earn(reward);
+    this.emit('chestClaimed', reward);
+    this.refresh();
+    return reward;
+  }
+
+  // ------------------------------------------------------------- Acil Sipariş
+  _rushOpen() {
+    const s = this.state;
+    return s.stats.sold >= RUSH.minSold && s.machines.reduce((a, m) => a + (m.owned ? 1 : 0), 0) >= RUSH.minMachines;
+  }
+
+  _nextRush() { this.rushTimer = RUSH.gapMin + this.rng() * (RUSH.gapMax - RUSH.gapMin); }
+
+  _rushTick(dt) {
+    const r = this.rush;
+    if (r) {
+      r.ttl -= dt;
+      if (r.ttl <= 0) { this.rush = null; this._nextRush(); this.emit('rushFail', r.machine); }
+      return;
+    }
+    if (!this._rushOpen()) return;
+    this.rushTimer -= dt;
+    if (this.rushTimer <= 0) this._startRush();
+  }
+
+  /** İstenecek adet: normal üretimin ~1.8 katı; bant kapasitesini aşamaz, en az minTarget. */
+  rushTarget(i) {
+    const m = this.state.machines[i], ct = cycleTime(MACHINES[i], m);
+    const beltMax = storageCap(m) / TUNING.beltTravelTime;
+    const want = Math.round(RUSH.ttl / ct * RUSH.factor);
+    return Math.max(RUSH.minTarget, Math.min(want, Math.floor(RUSH.ttl * beltMax * 0.6)));
+  }
+
+  _startRush() {
+    const owned = [];
+    for (let i = 0; i < MACHINES.length; i++) if (this.state.machines[i].owned) owned.push(i);
+    if (!owned.length) return;
+    const pick = owned.slice(-3);                                  // en yeni 3 makineden biri
+    const i = pick[Math.floor(this.rng() * pick.length) % pick.length];
+    this.rush = { machine: i, target: this.rushTarget(i), got: 0, ttl: RUSH.ttl, max: RUSH.ttl };
+    this.emit('rushStart', i, this.rush.target);
+  }
+
+  rushReward() {
+    const r = this.rush;
+    if (!r) return 0;
+    const value = itemValue(MACHINES[r.machine], this.state.machines[r.machine], this.gm);
+    return Math.floor(Math.max(RUSH.rewardMin, this.income * RUSH.rewardSecs, value * r.target * 3));
+  }
+
+  _rushSold(count) {
+    const r = this.rush;
+    r.got += count;
+    if (r.got < r.target) return;
+    const reward = this.rushReward();
+    this.rush = null; this._nextRush();                            // önce kapat, sonra öde (çift ödül olmaz)
+    this._earn(reward);
+    this.state.stats.rushDone++;
+    this.emit('rushDone', r.machine, reward);
+    this.refresh();
+  }
+
   // -------------------------------------------------- Patent Laboratuvarı / yeniden doğuş
   buyPatent(id) {
     const p = PATENTS.find((x) => x.id === id), meta = this.state.meta;
@@ -380,6 +551,7 @@ export class Game {
     }
     this.rt = MACHINES.map(makeRuntime);
     this.golden = null; this._nextGolden();
+    this.rush = null; this._nextRush();
     this.refresh();
     this.emit('prestige', gain);
     return gain;
@@ -403,6 +575,7 @@ export class Game {
       s.stats.offlineEarned += res.earned;
     }
     for (const r of this.rt) { r.count = 0; r.progress = 0; r.blocked = false; }
+    this.rush = null; this._nextRush();                  // çevrimdışıyken sipariş beklemez
     this.refresh(nowMs);
     return res.earned > 0 ? res : null;
   }

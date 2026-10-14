@@ -5,6 +5,7 @@ import { sanitizeState, createDefaultState } from './state.js';
 /** Eski kayıtları adım adım güncel sürüme taşır. Yeni sürüm: MIGRATIONS'a [v] -> fn ekle. */
 const MIGRATIONS = {
   1: (raw) => { raw.v = 2; return raw; }, // v2: meta (yıldız/patent), günlük hediye, 24 makine, 8 bölge (eksik alanlar sanitize ile doldurulur)
+  2: (raw) => { raw.v = 3; return raw; }, // v3: rozetler (ach), günlük görevler (dm), ipucu bayrakları (tut), müzik ayarı, yeni istatistikler
 };
 
 export function migrate(raw) {

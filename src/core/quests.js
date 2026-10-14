@@ -1,6 +1,6 @@
 import { QUESTS, MACHINES } from './config.js';
 
-const METRICS = {
+export const METRICS = {
   produced:    (s) => s.stats.produced,
   sold:        (s) => s.stats.sold,
   earned:      (s) => s.stats.earned,
@@ -8,6 +8,9 @@ const METRICS = {
   maxIncome:   (s) => s.stats.maxIncome,
   taps:        (s) => s.stats.taps,
   golden:      (s) => s.stats.golden,
+  rushDone:    (s) => s.stats.rushDone,
+  missionsDone: (s) => s.stats.missionsDone,
+  dailyStreak: (s) => s.daily.streak,
   prestiges:   (s) => s.meta.prestiges,
   totalStars:  (s) => s.meta.totalStars,
   automations: (s) => s.machines.reduce((a, m) => a + (m.auto ? 1 : 0), 0),

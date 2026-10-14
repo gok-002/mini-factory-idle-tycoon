@@ -16,6 +16,7 @@ export const ICONS = {
   check: s('<circle cx="12" cy="12" r="10" fill="#35c978" stroke="#2b2d42" stroke-width="2"/><path d="m7 12.5 3.4 3.4L17 9" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'),
   lock: s('<rect x="5" y="10" width="14" height="11" rx="2.5" fill="#8a93a6" stroke="#2b2d42" stroke-width="1.8"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10" fill="none" stroke="#2b2d42" stroke-width="2"/>'),
   star: s('<path d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" fill="#ffd23f" stroke="#2b2d42" stroke-width="1.8" stroke-linejoin="round"/>'),
+  medal: s('<path d="M7 2h4l1 6H8zM17 2h-4l-1 6h4z" fill="#ff5d6c" stroke="#2b2d42" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="15" r="7" style="fill:var(--m,#ffc928)" stroke="#2b2d42" stroke-width="2"/><path d="m12 11 1.3 2.7 3 .4-2.2 2.1.5 3-2.6-1.4-2.6 1.4.5-3-2.2-2.1 3-.4z" fill="#fff" opacity=".85"/>'),
   gift: s('<rect x="3" y="9" width="18" height="12" rx="2" fill="#ff5d6c" stroke="#2b2d42" stroke-width="1.8"/><rect x="2" y="6" width="20" height="4.5" rx="1.5" fill="#ff8a95" stroke="#2b2d42" stroke-width="1.8"/><path d="M12 6v15" stroke="#ffd23f" stroke-width="3"/><path d="M12 6c-2-4-6-3-5 0M12 6c2-4 6-3 5 0" fill="none" stroke="#2b2d42" stroke-width="1.8"/>'),
 };
 

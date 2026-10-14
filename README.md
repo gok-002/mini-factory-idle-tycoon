@@ -39,10 +39,12 @@ src/core/economy.js             pure economy formulas
 src/core/sim.js                 central production simulation + purchase rules (Game)
 src/core/offline.js             offline earnings (one central function)
 src/core/quests.js, state.js    quests; state schema + corrupt-save repair (sanitize)
+src/core/achievements.js        badges (50 permanent achievements, +1% income each)
 src/core/save.js                SaveManager: versioned saves, backup, migrations
+src/core/savecode.js            copy/paste save code (export/import between devices)
 src/render/                     canvas scene, machine/product drawing, particle pool
 src/ui/                         DOM UI (HUD, dock, sheets), icons
-src/services/                   audio/haptics, monetization interface (no provider)
+src/services/                   audio (effects + procedural music), haptics, monetization interface (no provider)
 tests/, scripts/                tests, balance bot, build script
 docs/MONETIZATION.md            ad / in-app purchase integration points (Turkish)
 ```
@@ -58,7 +60,13 @@ docs/MONETIZATION.md            ad / in-app purchase integration points (Turkish
 - **Golden Crate**: a crate that appears and vanishes on the scene; catch it for 40-100 seconds of income or a 20-second x3 frenzy boost.
 - **Daily gift**: a day streak (day 7 grants +1 Star). The gift button sits in the top corner.
 - **Patents / Renovate Factory**: always visible in the bottom bar; while locked it shows the requirement (2B total earnings in the current run) and a progress bar. Once unlocked you can reset progress to earn permanent **Patent Stars** (+10% income each). Spend stars on permanent patents: income, offline time/efficiency, tap power, machine discount, "Heritage Machines" (start a new run with ready-made machines) and Golden Crate frequency.
-- **Settings**: sound, haptics, reset.
+- **Goals panel** (the *Goals* button) has three tabs:
+  - **Quests**: the 124-quest ladder described above.
+  - **Daily**: 3 missions per calendar day picked from a pool (taps, upgrades, Golden Crates, Rush Orders, items sold, money earned), targets scale with your factory. Finish all three to open the Daily Chest. Rewards are claimed once; missions refresh at local midnight.
+  - **Badges**: 50 permanent achievements (4 tiers). Every badge gives **+1% income** forever, also while offline, and badges survive renovations.
+- **Rush Orders**: once you own two machines and have sold 150 items, a customer occasionally asks for N items of one of your newest machines within 30 seconds (an orange banner and a speech bubble at the booth show the progress; tap the banner to jump to that machine). Tapping and automation both count. A bonus payout is given on success; nothing is lost on failure. Orders do not wait while you are offline.
+- **New-player hints**: small speech bubbles point at the right button the first time you can level up, automate, buy a machine, claim a quest or open a zone.
+- **Settings**: sound effects, **music** (procedural, changes mood per chapter and pauses when the tab is hidden), haptics, **Statistics**, **Save Code** and reset. The save code is one line of text: copy it on one device and paste it on another to move your progress (it is validated and repaired on import; offline time does not accumulate while a code waits).
 - While offline, automated machines keep earning: up to 8 hours at 50% efficiency initially (up to 28 hours / 100% with patents).
 
 ## Visuals
@@ -75,11 +83,13 @@ After changing values, run `npm run balance` to see the pacing report and `npm t
 
 ## Test results (run during development)
 
-`npm test` -> 52 tests, all passing. Coverage: starting values, production timing, belt/sales and money gain, manual/automated production,
+`npm test` -> 78 tests, all passing. Coverage: starting values, production timing, belt/sales and money gain, manual/automated production,
 blocking purchases with insufficient funds, double-tap protection, sequential machine/zone locks and level requirements, speed upgrades,
 storage limits, bulk level costs, offline earnings (efficiency, cap, double-claim prevention, clock rollback), one-time quest rewards,
 quest ladders and chapter quests, save/load, corrupt/missing/tampered saves, v1 -> v2 save migration, storage errors, NaN/Infinity guards,
-prestige, patents, heritage machines, Golden Crate, daily gift, and a **balance bot** (greedy player simulation).
+prestige, patents, heritage machines, Golden Crate, daily gift, badges (grant once, income multiplier, silent backfill for old saves), daily missions (deterministic per day,
+claim once, chest, day rollover), Rush Orders (start conditions, counting, reward once, failure, cancel on offline/renovation), save code round-trip and tamper/garbage rejection,
+the v2 -> v3 save migration, the audio scheduler (with a fake audio context), and a **balance bot** (greedy player simulation).
 
 Verified manually in a Chromium-based embedded browser (375x812 / 360x640 / 320x568 layouts): main screen, tap-to-produce, products moving on belts,
 sale effects, buying machines/automation/zones, sheets, quest rewards, save + reload, offline popup, reset, no horizontal overflow.
@@ -110,9 +120,10 @@ Tips: lock the screen orientation to portrait (`AndroidManifest.xml -> screenOri
 ## Known gaps and next steps
 
 - **Not tested on real devices**: touch feel, haptics (`navigator.vibrate`, unavailable on iOS), audio latency and low-end phone performance still need verification.
-- Sound consists of simple synthesized effects; there is no music.
+- Sound effects and music are synthesized and have only been checked for errors in a desktop browser; how they sound and feel on real phones (and iOS audio unlocking) is unverified.
+- Badges add up to +50% income on top of the balance bot's numbers (the bot does not simulate badges, missions or Rush Orders), so real pacing will be somewhat faster than the report above.
 - 3 machines per zone (24 total, 8 zones); production chains (raw material -> processing -> packaging) do not yet link machines together. The data model (`kind`, `product`, `zone`) is ready for it.
-- No time-limited events, rewarded ads/IAP or cosmetic themes yet (integration points: `docs/MONETIZATION.md`).
-- Save schema is versioned (`SAVE_VERSION`); one migration exists (v1 -> v2, which added prestige, daily gift, 24 machines and 8 zones).
+- No calendar events, rewarded ads/IAP or cosmetic themes yet (integration points: `docs/MONETIZATION.md`).
+- Save schema is versioned (`SAVE_VERSION` = 3); migrations exist for v1 -> v2 (prestige, daily gift, 24 machines, 8 zones) and v2 -> v3 (badges, daily missions, hints, music setting).
 - Accessibility: basic `aria` labels exist; canvas content is not described for screen readers. Text is Turkish only.
 - Offline earnings trust the device clock (setting the clock forward only helps up to the offline time cap).

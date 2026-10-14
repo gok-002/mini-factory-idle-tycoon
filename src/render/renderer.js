@@ -333,6 +333,8 @@ export class Renderer {
 
     // satış kulübesi
     this._drawDock(k, x1 + 14, by, def);
+    const rush = this.game.rush;
+    if (rush && rush.machine === mi) this._drawRush(k, x1, by, def, rush);
 
     // makine
     const o = this.o;
@@ -420,6 +422,25 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** Acil Sipariş: şeridi turuncu çerçeveler, kulübenin üstünde müşterinin istediği ürünü ve kalan adedi gösterir. */
+  _drawRush(k, x1, by, def, rush) {
+    const ctx = this.ctx, top = this.laneTop(k), pulse = 0.5 + 0.5 * Math.sin(this.t * 7);
+    ctx.save();
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,138,61,' + (0.4 + 0.45 * pulse).toFixed(2) + ')';
+    rr(ctx, 3, top + 3, this.W - 6, this.laneH - 6, 10); ctx.stroke();
+    const h = Math.min(this.laneH * 0.62, 56), bw = 66, bh = 28;
+    const dx = x1 + 14 + this.dockW / 2 - 10;
+    const bx = Math.max(4, Math.min(this.W - bw - 4, dx - bw / 2)), bob = Math.sin(this.t * 5) * 2.5;
+    const byy = by - h - bh - 12 + bob;
+    rr(ctx, bx, byy, bw, bh, 10); ctx.fillStyle = '#fff7e0'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(dx - 6, byy + bh - 1); ctx.lineTo(dx, byy + bh + 8); ctx.lineTo(dx + 6, byy + bh - 1); ctx.fillStyle = '#fff7e0'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(dx - 6, byy + bh); ctx.lineTo(dx, byy + bh + 8); ctx.lineTo(dx + 6, byy + bh); ctx.stroke();
+    drawProduct(ctx, def.product, bx + 17, byy + bh / 2 + 3, 15, def.color);
+    ctx.font = '800 14px ' + FONT; ctx.fillStyle = OUT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('×' + Math.max(0, rush.target - rush.got), bx + 32, byy + bh / 2 + 1);
+    ctx.restore();
+  }
+
   _drawLocked(k, mi) {
     const ctx = this.ctx, def = MACHINES[mi], game = this.game;
     const top = this.laneTop(k), cx = this.W / 2;
@@ -493,6 +514,25 @@ export class Renderer {
         break;
       }
       case 'questClaimed':
+        fx.burst(K.CONFETTI, this.W / 2, this.H * 0.35, 36, 260, 1.3, 4, -1);
+        fx.burst(K.COIN, this.W / 2, this.H * 0.35, 10, 220, 1, 6, C.GOLD);
+        break;
+      case 'rushStart': {
+        if (k < 0) return;
+        fx.ring(this.beltX1() + this.dockW / 2, this.baseY(k) - 40, 46, C.ORANGE);
+        fx.text('SİPARİŞ!', this.W / 2, this.laneTop(k) + this.laneH * 0.5, C.ORANGE, 22);
+        break;
+      }
+      case 'rushDone':
+        fx.burst(K.CONFETTI, this.W / 2, this.H * 0.4, 40, 280, 1.3, 4, -1);
+        fx.burst(K.COIN, this.W / 2, this.H * 0.4, 12, 240, 1, 6, C.GOLD);
+        fx.text('TESLİM EDİLDİ!', this.W / 2, this.H * 0.34, C.GREEN, 22);
+        break;
+      case 'achievement':
+        fx.burst(K.STAR, this.W / 2, this.H * 0.45, 10, 200, 1, 9, C.GOLD);
+        fx.ring(this.W / 2, this.H * 0.45, 60, C.GOLD);
+        break;
+      case 'chestClaimed':
         fx.burst(K.CONFETTI, this.W / 2, this.H * 0.35, 36, 260, 1.3, 4, -1);
         fx.burst(K.COIN, this.W / 2, this.H * 0.35, 10, 220, 1, 6, C.GOLD);
         break;

@@ -36,7 +36,13 @@
     <canvas id="game" aria-label="Fabrika"></canvas>
     <button id="zone-prev" class="zone-arrow left" aria-label="Önceki bölge" hidden>‹</button>
     <button id="zone-next" class="zone-arrow right" aria-label="Sonraki bölge" hidden>›</button>
+    <button id="rush" class="rush" hidden aria-label="Acil Sipariş">
+      <span class="r-fill" id="rush-fill"></span>
+      <span class="r-row"><span class="r-tag">SİPARİŞ</span><span class="r-name" id="rush-name"></span><span class="r-time" id="rush-time"></span></span>
+      <span class="r-tbar"><u id="rush-tbar"></u></span>
+    </button>
     <div id="toast" role="status"></div>
+    <div id="notice" role="status"></div>
   </main>
 
   <footer id="dock">
@@ -61,6 +67,7 @@
     </nav>
   </footer>
 
+  <div id="coach" hidden><div class="cbody" id="coach-text"></div></div>
   <div id="backdrop" hidden></div>
   <section id="sheet" aria-modal="true" role="dialog" hidden>
     <div class="sheet-head"><h2 id="sheet-title"></h2><button id="sheet-close" class="round-btn" aria-label="Kapat">✕</button></div>

@@ -1,5 +1,5 @@
 // Giriş noktası: bileşenleri bağlar, oyun döngüsünü, kaydı ve arka plan davranışını yönetir.
-import { TUNING, MACHINES } from './core/config.js';
+import { TUNING, MACHINES, ACHIEVEMENTS, RUSH } from './core/config.js';
 import { SaveManager, MemoryStorage } from './core/save.js';
 import { Game } from './core/sim.js';
 import { Renderer } from './render/renderer.js';
@@ -31,18 +31,40 @@ const game = new Game(loaded.state, (type, a, b, c) => {
     case 'sell': feedback.sell(); break;
     case 'levelUp': case 'upgrade': feedback.upgrade(); break;
     case 'auto': feedback.upgrade(); ui && ui.toast('Otomasyon açıldı!'); break;
-    case 'buyMachine': feedback.unlock(); ui && ui.toast(MACHINES[a].name + ' kuruldu!'); break;
-    case 'zone': feedback.unlock(); ui && ui.showChapter(a); break;
+    case 'buyMachine': feedback.fanfare(); ui && ui.toast(MACHINES[a].name + ' kuruldu!'); break;
+    case 'zone': feedback.fanfare(); ui && ui.showChapter(a); break;
     case 'goldenSpawn': feedback.quest(); ui && ui.toast('Altın Kasa belirdi! Yakala!'); break;
     case 'goldenCollected': feedback.upgrade(); renderer && renderer.goldenFx(a, b); break;
     case 'patent': feedback.upgrade(); break;
-    case 'patentUnlocked': feedback.unlock(); ui && ui.toast('Patent Laboratuvarı açıldı! Fabrikanı yenileyebilirsin.'); break;
+    case 'patentUnlocked': feedback.fanfare(); ui && ui.toast('Patent Laboratuvarı açıldı! Fabrikanı yenileyebilirsin.'); break;
     case 'daily': break;
-    case 'prestige': feedback.unlock(); renderer && renderer.setZone(0); ui && (ui.closeSheet(true), ui.toast('Fabrika yenilendi! +' + formatNum(a) + ' Yıldız')); break;
+    case 'prestige': feedback.fanfare(); renderer && renderer.setZone(0); ui && (ui.closeSheet(true), ui.toast('Fabrika yenilendi! +' + formatNum(a) + ' Yıldız')); break;
     case 'questReady': feedback.quest(); ui && ui.toast('Görev tamamlandı! Ödülünü al.'); break;
     case 'questClaimed': feedback.quest(); break;
     case 'deny': feedback.deny(); ui && ui.toast(a === 'money' ? 'Yeterli paran yok!' : a === 'stars' ? 'Yeterli Yıldız yok!' : a === 'level' ? 'Önceki makinenin seviyesi yetersiz (Sv.' + b + ')' : 'Yapılamaz'); break;
     case 'blocked': break;
+    case 'achievement': {
+      const ach = ACHIEVEMENTS.find((x) => x.id === a);
+      feedback.medal();
+      ui && ach && ui.notify('medal', 'Rozet: ' + ach.title, ach.desc + '  ·  +%1 gelir', 'medal-' + ach.tier);
+      break;
+    }
+    case 'missionReady': {
+      if (!ui) break;                                  // yükleme sırasında arayüz henüz yok
+      feedback.quest();
+      const m = game.missions()[a];
+      m && ui.notify('target', 'Günlük görev tamamlandı!', m.text + '  ·  Hedefler → Günlük');
+      break;
+    }
+    case 'missionClaimed': feedback.quest(); break;
+    case 'chestClaimed': feedback.fanfare(); ui && ui.notify('gift', 'Günün sandığı açıldı!', '+' + formatNum(a) + ' kazandın'); break;
+    case 'rushStart':
+      if (!ui) break;
+      feedback.alarm();
+      ui.notify('bolt', 'Acil Sipariş!', MACHINES[a].name + ': ' + b + ' adet sat · ' + RUSH.ttl + ' sn · Ödül ' + formatNum(game.rushReward()));
+      break;
+    case 'rushDone': feedback.fanfare(); ui && ui.notify('coin', 'Sipariş teslim edildi!', '+' + formatNum(b) + ' kazandın'); break;
+    case 'rushFail': ui && ui.toast('Sipariş kaçtı… Bir sonrakinde yakala!'); break;
     default:
   }
 });
@@ -57,6 +79,7 @@ renderer = new Renderer(document.getElementById('game'), game);
 ui = new UI(game, renderer, feedback, saveMgr, {
   save,
   reset() { noSave = true; saveMgr.reset(); location.reload(); },
+  importState(state) { noSave = true; if (saveMgr.save(state)) location.reload(); else { noSave = false; ui.toast('Kayıt yüklenemedi (depolama dolu/kapalı)'); } },
 });
 
 function selectInitialZone() {
@@ -113,6 +136,7 @@ function loop(ts) {
 
   renderer.frame(Math.min(dt, 0.1));
   ui.frame(dt);
+  feedback.setMood(renderer.zone);
 
   saveTimer += dt;
   if (saveTimer >= TUNING.autosaveSec) { saveTimer = 0; save(); }
@@ -125,6 +149,7 @@ let welcomeMsg = '';
 if (loaded.status === 'recovered') welcomeMsg = 'Kayıt yedekten kurtarıldı';
 else if (loaded.status === 'corrupt') welcomeMsg = 'Kayıt okunamadı, yeni oyun başladı';
 else if (loaded.status === 'new') welcomeMsg = 'Makineye dokunarak üretimi hızlandır!';
+else if (game.backfilled > 0) welcomeMsg = game.backfilled + ' rozet kazandın! (Hedefler → Rozetler)';
 const splash = document.getElementById('splash');
 if (splash) {
   if (loaded.status === 'ok' || loaded.status === 'recovered') {
@@ -148,4 +173,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 
 // Hata ayıklama / test kancası
-window.__mf = { game, renderer, ui, saveMgr, save, handleOffline };
+window.__mf = { game, renderer, ui, saveMgr, save, handleOffline, feedback };

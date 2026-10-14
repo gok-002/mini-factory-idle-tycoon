@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MACHINES, ZONES, QUESTS, PATENTS, PRESTIGE, GOLDEN, DAILY, SLOTS_PER_ZONE, TUNING } from '../src/core/config.js';
+import { MACHINES, ZONES, QUESTS, PATENTS, PRESTIGE, GOLDEN, DAILY, SLOTS_PER_ZONE, TUNING, SAVE_VERSION } from '../src/core/config.js';
 import { createDefaultState, sanitizeState } from '../src/core/state.js';
 import { Game, dayKey } from '../src/core/sim.js';
 import { SaveManager, MemoryStorage, migrate } from '../src/core/save.js';
 import { visibleQuests, questDone, claimableCount } from '../src/core/quests.js';
-import { prestigeGain, permMult, offlineCapHours, offlineEfficiency, patentCost, machineBuyCost } from '../src/core/economy.js';
+import { prestigeGain, permMult, achMult, offlineCapHours, offlineEfficiency, patentCost, machineBuyCost } from '../src/core/economy.js';
 import { computeOffline } from '../src/core/offline.js';
 
 const fresh = (rng) => new Game(createDefaultState(0), undefined, rng);
@@ -25,14 +25,14 @@ test('içerik bütünlüğü: 8 bölge x 3 makine, benzersiz kimlikler, artan ma
   assert.ok(QUESTS.length >= 100);
 });
 
-test('v1 kaydı (eski oyuncu) v2 şemasına taşınır: ilerleme korunur, yeni içerik kilitli', () => {
+test('v1 kaydı (eski oyuncu) güncel şemaya taşınır: ilerleme korunur, yeni içerik kilitli', () => {
   const old = { v: 1, money: 5e9, stats: { produced: 900, sold: 800, earned: 3e10, upgrades: 40, maxIncome: 1e8, taps: 300, offlineEarned: 0 },
     machines: [{ id: 'press', owned: true, level: 80, auto: true }, { id: 'robotarm', owned: true, level: 12, auto: true }],
     zones: [{ id: 'workshop', unlocked: true }, { id: 'robotics', unlocked: true }], quests: { produce10: true, zone3: true }, lastSeen: 1000 };
   const st = new MemoryStorage(); st.setItem('miniFactory.save', JSON.stringify(old));
   const { state, status } = new SaveManager(st).load(2000);
   assert.equal(status, 'ok');
-  assert.equal(state.v, 2);
+  assert.equal(state.v, SAVE_VERSION);
   assert.equal(state.money, 5e9);
   assert.equal(state.machines[0].level, 80);
   assert.equal(state.machines[8].owned, true);
@@ -42,7 +42,8 @@ test('v1 kaydı (eski oyuncu) v2 şemasına taşınır: ilerleme korunur, yeni i
   assert.equal(state.quests.zone3, true);
   assert.equal(state.stats.runEarned, 3e10);   // mevcut koşu = şimdiye kadarki kazanç
   assert.equal(state.meta.stars, 0);
-  assert.equal(migrate({ v: 1 }).v, 2);
+  assert.equal(migrate({ v: 1 }).v, SAVE_VERSION);
+  assert.equal(migrate({ v: 2 }).v, SAVE_VERSION);
 });
 
 test('görev merdiveni: her seriden yalnızca sıradaki görev görünür', () => {
@@ -88,14 +89,14 @@ test('yeniden doğuş: yıldız kazandırır, ilerlemeyi sıfırlar, kalıcılar
   assert.equal(s.quests.produce10, true);              // görev ödülü tekrar alınamaz
   assert.equal(s.settings.sound, false);
   assert.equal(s.stats.taps, 77);
-  assert.ok(Math.abs(permMult(s) - 2) < 1e-9);         // 1 + 10*0.1
+  assert.ok(Math.abs(permMult(s) - 2 * achMult(s)) < 1e-9);   // yıldız çarpanı 1 + 10*0.1; rozetler ayrıca eklenir
   assert.equal(g.prestige(), 0);                       // kazanç yokken tekrar yenilenemez
 });
 
 test('yeniden doğuş çarpanı geliri gerçekten artırır', () => {
   const a = fresh(); a.state.machines[0].auto = true; a.refresh();
   const b = fresh(); b.state.machines[0].auto = true; b.state.meta.totalStars = 20; b.refresh();
-  assert.ok(Math.abs(b.income / a.income - 3) < 1e-9);
+  assert.ok(Math.abs(b.income / a.income - 3 * achMult(b.state) / achMult(a.state)) < 1e-9);   // 20 yıldız = x3 (ve bir 'Yıldız Tozu' rozeti)
 });
 
 test('Patent Laboratuvarı: yıldız yetmezse alınmaz, yetince etki eder, maks seviyede durur', () => {
