@@ -6,6 +6,7 @@ import { FONT, OUT, rr, shade, drawMachine, drawProduct, drawLock } from './draw
 import { FX, K, C } from './fx.js';
 
 const PI2 = Math.PI * 2;
+const MOTE_COLOR = [C.WHITE, C.GREEN, C.PURPLE, C.WHITE, C.PURPLE, C.GOLD, C.GREEN, C.GOLD];   // bölge başına ortam parçacığı rengi
 const easeOutBack = (t) => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 
 export class Renderer {
@@ -23,6 +24,15 @@ export class Renderer {
     this.lastText = new Float64Array(MACHINES.length);
     this.shake = new Float32Array(SLOTS_PER_ZONE);
     this.hintTime = 0;
+    this.live = null;                                   // duvarın canlı (animasyonlu) parçaları
+    this.fade = 0;                                      // bölge geçişi karartması
+    this.moteT = 0;                                     // ortam parçacığı sayacı
+    this.dt = 0.016;
+    this.steamT = new Float32Array(SLOTS_PER_ZONE);
+    this.coinT = 0;
+    this.coinTarget = { x: 40, y: -30 };                // uçan jetonların varacağı nokta (para kutusu)
+    this.fx.target = this.coinTarget;
+    this.onCoinArrive = null;
     this.o = { color: '#fff', tier: 0, p: 0, t: 0, pulse: 0, auto: false, blocked: false, level: 1 }; // yeniden kullanılan çizim parametresi
     this.setZone(0);
   }
@@ -32,6 +42,7 @@ export class Renderer {
     this.lanes = [];
     for (let i = 0; i < MACHINES.length; i++) if (MACHINES[i].zone === z) this.lanes.push(i);
     this.bgDirty = true;
+    if (this.W) this.fade = 1;
   }
 
   resize() {
@@ -46,6 +57,8 @@ export class Renderer {
     this.mw = Math.min(this.laneH * 1.2, this.W * 0.38);
     this.dockW = Math.min(64, this.W * 0.17);
     this.bgDirty = true;
+    const ico = document.querySelector('#money-pill .ico');   // jetonlar buraya uçar
+    if (ico) { const pr = ico.getBoundingClientRect(); this.coinTarget.x = pr.left + pr.width / 2 - r.left; this.coinTarget.y = pr.top + pr.height / 2 - r.top; }
   }
 
   // ------------------------------------------------------------ yerleşim yardımcıları
@@ -94,31 +107,35 @@ export class Renderer {
       for (let x = ((k % 2) * 20); x < W; x += 40) c.fillRect(x, y, 20, this.laneH);
       c.fillStyle = 'rgba(0,0,0,.14)'; c.fillRect(0, y, W, 2);
     }
+    this._drawBeams(c);
     this.bgDirty = false;
   }
 
-  /** Duvar süsü: bölgeye göre pencere / yıldız / kristal / saat / neon / galaksi. */
+  /** Duvar süsü (statik kısım). Canlı parçalar this.live'a kaydedilir ve _drawLive'da her karede çizilir. */
   _drawDeco(c, z, W, wh) {
     const rnd = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }; // sabit "rastgele"
     const deco = z.deco;
+    this.live = { type: deco, wins: [], stars: [], tips: [], clocks: [] };
+    const L = this.live;
     if (deco === 'windows') {
       const wins = Math.max(2, Math.floor(W / 110));
       for (let i = 0; i < wins; i++) {
         const wx = (i + 0.5) * (W / wins) - 22;
-        rr(c, wx, 8, 44, wh - 22, 6); c.fillStyle = '#bfe6ff'; c.fill(); c.lineWidth = 2.5; c.strokeStyle = OUT; c.stroke();
-        c.fillStyle = 'rgba(255,255,255,.55)'; c.fillRect(wx + 5, 12, 10, wh - 30);
-        c.fillStyle = OUT; c.fillRect(wx + 21, 8, 2, wh - 22);
+        rr(c, wx, 8, 44, wh - 22, 6); c.fillStyle = '#bfe6ff'; c.fill();
+        L.wins.push({ x: wx, y: 8, w: 44, h: wh - 22 });
       }
     } else if (deco === 'stars' || deco === 'galaxy') {
       for (let i = 0; i < 46; i++) {
-        c.globalAlpha = 0.4 + rnd(i + 9) * 0.6; c.fillStyle = '#fff';
-        const r = rnd(i + 3) * 1.6 + 0.4; c.fillRect(rnd(i) * W, rnd(i + 50) * (wh - 12), r, r);
+        c.globalAlpha = 0.3 + rnd(i + 9) * 0.5; c.fillStyle = '#fff';
+        const r = rnd(i + 3) * 1.6 + 0.4, x = rnd(i) * W, y = rnd(i + 50) * (wh - 12); c.fillRect(x, y, r, r);
+        if (i < 16) L.stars.push([x, y, 2 + rnd(i + 70) * 2.5]);
       }
       c.globalAlpha = 1;
       if (deco === 'stars') { // Dünya
         const px = W * 0.82, py = wh * 0.45, pr = wh * 0.36;
         c.beginPath(); c.arc(px, py, pr, 0, Math.PI * 2); c.fillStyle = '#3d8bff'; c.fill(); c.lineWidth = 2.5; c.strokeStyle = OUT; c.stroke();
         c.fillStyle = '#4fd37a'; c.beginPath(); c.ellipse(px - pr * 0.3, py - pr * 0.1, pr * 0.35, pr * 0.28, 0.5, 0, Math.PI * 2); c.fill();
+        c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.ellipse(px + pr * 0.25, py - pr * 0.45, pr * 0.3, pr * 0.1, 0, 0, Math.PI * 2); c.fill();
       } else { // spiral galaksi
         const gx = W * 0.2, gy = wh * 0.5;
         const g = c.createRadialGradient(gx, gy, 1, gx, gy, wh * 0.7); g.addColorStop(0, 'rgba(255,214,255,.95)'); g.addColorStop(1, 'rgba(160,90,255,0)');
@@ -130,21 +147,87 @@ export class Renderer {
         c.beginPath(); c.moveTo(cx, wh - 8 - h); c.lineTo(cx + w / 2, wh - 8); c.lineTo(cx - w / 2, wh - 8); c.closePath();
         c.fillStyle = i % 2 ? '#c77dff' : '#4cc9f0'; c.fill(); c.lineWidth = 2; c.strokeStyle = OUT; c.stroke();
         c.fillStyle = 'rgba(255,255,255,.45)'; c.beginPath(); c.moveTo(cx, wh - 8 - h); c.lineTo(cx + w * 0.1, wh - 8 - h * 0.2); c.lineTo(cx - w * 0.3, wh - 8 - h * 0.2); c.fill();
+        L.tips.push([cx, wh - 8 - h * 0.6, 4 + rnd(i + 5) * 4]);
       }
     } else if (deco === 'clocks') {
       const n = Math.max(2, Math.floor(W / 120));
       for (let i = 0; i < n; i++) {
         const cx = (i + 0.5) * (W / n), cy = wh * 0.45, r = wh * 0.34;
         c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fillStyle = '#fff7e0'; c.fill(); c.lineWidth = 3; c.strokeStyle = OUT; c.stroke();
-        c.lineWidth = 2; c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx, cy - r * 0.7); c.moveTo(cx, cy); c.lineTo(cx + r * 0.5, cy + r * 0.2 * (i % 2 ? 1 : -1)); c.stroke();
+        c.lineWidth = 1.5;
+        for (let q = 0; q < 12; q++) { const a = q * Math.PI / 6; c.beginPath(); c.moveTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8); c.lineTo(cx + Math.cos(a) * r * 0.92, cy + Math.sin(a) * r * 0.92); c.stroke(); }
+        L.clocks.push([cx, cy, r]);
       }
     } else if (deco === 'neon') {
-      c.lineWidth = 1.5; c.strokeStyle = 'rgba(6,214,160,.55)';
+      c.lineWidth = 1.5; c.strokeStyle = 'rgba(6,214,160,.45)';
       for (let x = 0; x < W; x += 26) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, wh - 8); c.stroke(); }
       for (let y = 6; y < wh - 8; y += 14) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
-      c.strokeStyle = '#06d6a0'; c.lineWidth = 3; c.beginPath();
-      for (let x = 0; x <= W; x += 6) c.lineTo(x, wh * 0.5 + Math.sin(x * 0.07) * wh * 0.22);
-      c.stroke();
+    }
+  }
+
+  /** Işık huzmeleri (pencereli bölgelerde zeminin üstüne, statik). */
+  _drawBeams(c) {
+    const L = this.live;
+    if (!L || L.type !== 'windows') return;
+    c.fillStyle = 'rgba(255,255,255,.13)';
+    for (const w of L.wins) {
+      c.beginPath(); c.moveTo(w.x + 4, this.wallH); c.lineTo(w.x + w.w - 4, this.wallH);
+      c.lineTo(w.x + w.w + 46, this.wallH + this.laneH * 0.95); c.lineTo(w.x + 30, this.wallH + this.laneH * 0.95); c.closePath(); c.fill();
+    }
+  }
+
+  /** Duvarın canlı parçaları: bulutlar, yanıp sönen yıldızlar, kayan yıldız, saat ibreleri, neon dalga, kristal ışıltısı. */
+  _drawLive(ctx) {
+    const L = this.live, t = this.t, wh = this.wallH, W = this.W;
+    if (!L) return;
+    if (L.type === 'windows') {
+      ctx.fillStyle = 'rgba(255,255,255,.95)';
+      for (let i = 0; i < L.wins.length; i++) {
+        const w = L.wins[i];
+        ctx.save(); ctx.beginPath(); ctx.rect(w.x, w.y, w.w, w.h); ctx.clip();
+        for (let k = 0; k < 2; k++) {
+          const cx = w.x + ((t * (5 + k * 3) + i * 17 + k * 30) % (w.w + 30)) - 15, cy = w.y + 8 + k * 11;
+          ctx.beginPath(); ctx.arc(cx, cy, 5, 0, PI2); ctx.arc(cx + 6, cy + 1, 4, 0, PI2); ctx.arc(cx - 5, cy + 2, 3.5, 0, PI2); ctx.fill();
+        }
+        ctx.restore();
+        ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; rr(ctx, w.x, w.y, w.w, w.h, 6); ctx.stroke();
+        ctx.fillStyle = OUT; ctx.fillRect(w.x + 21, w.y, 2, w.h); ctx.fillStyle = 'rgba(255,255,255,.95)';
+        ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillRect(w.x + 5, w.y + 4, 8, w.h - 10); ctx.fillStyle = 'rgba(255,255,255,.95)';
+      }
+    } else if (L.type === 'stars' || L.type === 'galaxy') {
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < L.stars.length; i++) {
+        const [x, y, r] = L.stars[i], a = 0.25 + 0.75 * Math.abs(Math.sin(t * 1.8 + i * 1.7));
+        ctx.globalAlpha = a; ctx.save(); ctx.translate(x, y); ctx.beginPath();
+        ctx.moveTo(0, -r); ctx.lineTo(r * 0.25, -r * 0.25); ctx.lineTo(r, 0); ctx.lineTo(r * 0.25, r * 0.25); ctx.lineTo(0, r); ctx.lineTo(-r * 0.25, r * 0.25); ctx.lineTo(-r, 0); ctx.lineTo(-r * 0.25, -r * 0.25); ctx.fill(); ctx.restore();
+      }
+      const f = (t % 6.5) / 1.1;              // kayan yıldız
+      if (f < 1) {
+        const x = W * 0.15 + f * W * 0.55, y = 4 + f * wh * 0.55;
+        ctx.globalAlpha = 1 - f; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 26, y - 11); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (L.type === 'crystals') {
+      for (let i = 0; i < L.tips.length; i++) {
+        const [x, y, r] = L.tips[i], a = Math.max(0, Math.sin(t * 2.2 + i * 2.3));
+        if (a < 0.4) continue;
+        ctx.globalAlpha = a; ctx.fillStyle = '#fff'; ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4); ctx.beginPath();
+        ctx.moveTo(0, -r); ctx.lineTo(r * 0.2, -r * 0.2); ctx.lineTo(r, 0); ctx.lineTo(r * 0.2, r * 0.2); ctx.lineTo(0, r); ctx.lineTo(-r * 0.2, r * 0.2); ctx.lineTo(-r, 0); ctx.lineTo(-r * 0.2, -r * 0.2); ctx.fill(); ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    } else if (L.type === 'clocks') {
+      ctx.strokeStyle = OUT; ctx.lineCap = 'round';
+      for (let i = 0; i < L.clocks.length; i++) {
+        const [cx, cy, r] = L.clocks[i], am = t * 0.9 + i, ah = t * 0.075 + i * 2;
+        ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(ah) * r * 0.5, cy + Math.sin(ah) * r * 0.5); ctx.stroke();
+        ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(am) * r * 0.75, cy + Math.sin(am) * r * 0.75); ctx.stroke();
+        ctx.fillStyle = OUT; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, PI2); ctx.fill();
+      }
+    } else if (L.type === 'neon') {
+      ctx.strokeStyle = '#06d6a0'; ctx.lineWidth = 3; ctx.beginPath();
+      for (let x = 0; x <= W; x += 6) ctx.lineTo(x, wh * 0.5 + Math.sin(x * 0.07 + t * 3) * wh * 0.22);
+      ctx.stroke();
+      ctx.globalAlpha = 0.35; ctx.lineWidth = 7; ctx.stroke(); ctx.globalAlpha = 1;
     }
   }
 
@@ -152,12 +235,15 @@ export class Renderer {
   frame(dt) {
     if (!this.W) return;
     if (this.bgDirty) this._drawBackground();
-    this.t += dt;
+    this.t += dt; this.dt = dt;
     this.fx.update(dt);
+    if (this.fx.arrived > 0) { const n = this.fx.arrived; this.fx.arrived = 0; if (this.onCoinArrive) this.onCoinArrive(n); }
     this.hintTime += dt;
     const ctx = this.ctx, game = this.game;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.drawImage(this.bg, 0, 0, this.W, this.H);
+    this._drawLive(ctx);
+    this._ambient(dt);
     ctx.textBaseline = 'middle';
 
     for (let k = 0; k < SLOTS_PER_ZONE; k++) {
@@ -170,6 +256,19 @@ export class Renderer {
     }
     this._drawGolden(ctx);
     this.fx.draw(ctx);
+    if (this.fade > 0) {           // bölge geçişi: karardan açılma
+      this.fade = Math.max(0, this.fade - dt * 3.2);
+      ctx.fillStyle = 'rgba(15,21,48,' + (this.fade * 0.9).toFixed(3) + ')'; ctx.fillRect(0, 0, this.W, this.H);
+    }
+  }
+
+  /** Bölgeye göre ortam parçacıkları (toz, kıvılcım, kum, neon...). */
+  _ambient(dt) {
+    this.moteT -= dt;
+    if (this.moteT > 0) return;
+    this.moteT = 0.28;
+    const col = MOTE_COLOR[this.zone] ?? C.WHITE;
+    this.fx.spawn(K.MOTE, Math.random() * this.W, this.wallH + Math.random() * (this.H - this.wallH), 0, -(6 + Math.random() * 10), 3.5 + Math.random() * 3, 1.4 + Math.random() * 1.8, col);
   }
 
   /** Altın Kasa: sahnede zıplayan, dokununca ödül veren kasa. Konum game.golden'dan (0..1). */
@@ -224,6 +323,14 @@ export class Renderer {
     for (let x = x0 - 14 + off; x < x1 + 12; x += 14) { ctx.beginPath(); ctx.moveTo(x, bty + bh - 2); ctx.lineTo(x + 5, bty + bh / 2); ctx.lineTo(x, bty + 2); ctx.lineTo(x + 4, bty + 2); ctx.lineTo(x + 9, bty + bh / 2); ctx.lineTo(x + 4, bty + bh - 2); ctx.fill(); }
     ctx.restore();
 
+    // bant makaraları ve ray parlaması
+    for (const rx of [x0 - 8, x1 + 14]) {
+      ctx.save(); ctx.translate(rx, bty + bh / 2);
+      ctx.beginPath(); ctx.arc(0, 0, bh * 0.72, 0, PI2); ctx.fillStyle = '#7b8494'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+      ctx.rotate(moving ? this.t * 6 : 0); ctx.fillStyle = OUT; ctx.fillRect(-bh * 0.5, -1, bh, 2); ctx.restore();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.fillRect(x0 - 2, bty + 1.5, x1 - x0 + 10, 1.5);
+
     // satış kulübesi
     this._drawDock(k, x1 + 14, by, def);
 
@@ -246,7 +353,17 @@ export class Renderer {
     for (let q = 0; q < r.count; q++) {
       const f = r.ages[q] / TUNING.beltTravelTime;
       const px = x0 + (x1 - x0 + 8) * (f > 1 ? 1 : f);
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(px, bty + 1, size * 0.42, 2.2, 0, 0, PI2); ctx.fill();
       drawProduct(ctx, def.product, px, iy - Math.abs(Math.sin(f * 14)) * 1.5, size, def.color);
+    }
+
+    // otomatik makineden periyodik buhar
+    if (m.auto) {
+      this.steamT[k] -= this.dt;
+      if (this.steamT[k] <= 0) {
+        this.steamT[k] = 0.8 + Math.random() * 1.1;
+        this.fx.spawn(K.PUFF, cx + this.mw * 0.26, by - mh * 0.52, (Math.random() - 0.5) * 8, -24, 0.9, 5, C.WHITE);
+      }
     }
 
     // seviye rozeti
@@ -284,9 +401,22 @@ export class Renderer {
       ctx.fillRect(-aw / 2 + (aw / 4) * i, -h * 0.7 - ah, aw / 4, ah);
     }
     ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.strokeRect(-aw / 2, -h * 0.7 - ah, aw, ah);
-    // altın jetonu
-    ctx.beginPath(); ctx.arc(0, -h * 0.34, h * 0.17, 0, PI2); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = '#b8860b'; ctx.font = '800 ' + Math.round(h * 0.24) + 'px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('$', 0, -h * 0.33);
+    // satıcı: gözleri kırpar, satışta sevinir
+    const cy = -h * 0.36, hr = h * 0.2, happy = bounce > 0.15;
+    const blink = !happy && ((this.t * 0.8 + k * 1.3) % 3.2) > 3.05;
+    ctx.beginPath(); ctx.arc(0, cy, hr, 0, PI2); ctx.fillStyle = '#ffd8a8'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, cy - hr * 0.35, hr * 1.02, Math.PI, 0); ctx.lineTo(hr * 1.25, cy - hr * 0.3); ctx.lineTo(-hr * 1.25, cy - hr * 0.3); ctx.closePath();
+    ctx.fillStyle = def.color; ctx.fill(); ctx.stroke();                       // şapka
+    ctx.fillStyle = OUT; ctx.strokeStyle = OUT; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+    for (const ex of [-hr * 0.4, hr * 0.4]) {
+      if (happy) { ctx.beginPath(); ctx.arc(ex, cy + hr * 0.12, hr * 0.17, Math.PI, 0); ctx.stroke(); }
+      else if (blink) { ctx.beginPath(); ctx.moveTo(ex - hr * 0.16, cy + hr * 0.1); ctx.lineTo(ex + hr * 0.16, cy + hr * 0.1); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.arc(ex, cy + hr * 0.1, hr * 0.13, 0, PI2); ctx.fill(); }
+    }
+    ctx.beginPath();
+    if (happy) { ctx.arc(0, cy + hr * 0.38, hr * 0.28, 0, Math.PI); ctx.fillStyle = '#c0392b'; ctx.fill(); ctx.stroke(); }
+    else { ctx.arc(0, cy + hr * 0.3, hr * 0.22, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(w * 0.27, -h * 0.1, h * 0.09, 0, PI2); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 1.5; ctx.stroke();   // jeton
     ctx.restore();
   }
 
@@ -346,6 +476,7 @@ export class Renderer {
         this.dockBounce[k] = 1;
         const x = this.beltX1() + this.dockW / 2, y = this.baseY(k) - 40;
         fx.burst(K.COIN, x, y, 3, 130, 0.7, 5, C.GOLD);
+        if (this.t - this.coinT > 0.14) { this.coinT = this.t; for (let q = 0; q < 2; q++) fx.spawn(K.FLY, x, y, (Math.random() - 0.5) * 200, -140 - Math.random() * 90, 2.2, 6, C.GOLD); }
         if (this.t - this.lastText[a] > 0.18) {
           this.lastText[a] = this.t;
           fx.text("+" + formatNum(b), Math.min(x - 6, this.W - 34), y - 8, C.GOLD, 15);

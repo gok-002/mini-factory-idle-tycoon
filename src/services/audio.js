@@ -5,10 +5,12 @@ export class Feedback {
     this.ctx = null;
     this.master = null;
     this.last = {};
+    this.active = false;   // tarayıcılar titreşimi/sesi ancak ilk dokunuştan sonra kabul eder
   }
 
   /** Tarayıcılar sesi ancak kullanıcı etkileşiminden sonra başlatır. */
   unlock() {
+    this.active = true;
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
     if (!AC) return;
@@ -42,7 +44,7 @@ export class Feedback {
   }
 
   vibrate(pattern) {
-    if (this.settings.haptics && typeof navigator !== 'undefined' && navigator.vibrate) {
+    if (this.active && this.settings.haptics && typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate(pattern); } catch (e) { /* desteklenmiyor */ }
     }
   }

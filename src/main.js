@@ -5,7 +5,8 @@ import { Game } from './core/sim.js';
 import { Renderer } from './render/renderer.js';
 import { UI } from './ui/ui.js';
 import { Feedback } from './services/audio.js';
-import { formatNum } from './core/format.js';
+import { formatNum, formatRate } from './core/format.js';
+import { factoryLevel } from './core/economy.js';
 
 function getStorage() {
   try {
@@ -35,6 +36,7 @@ const game = new Game(loaded.state, (type, a, b, c) => {
     case 'goldenSpawn': feedback.quest(); ui && ui.toast('Altın Kasa belirdi! Yakala!'); break;
     case 'goldenCollected': feedback.upgrade(); renderer && renderer.goldenFx(a, b); break;
     case 'patent': feedback.upgrade(); break;
+    case 'patentUnlocked': feedback.unlock(); ui && ui.toast('Patent Laboratuvarı açıldı! Fabrikanı yenileyebilirsin.'); break;
     case 'daily': break;
     case 'prestige': feedback.unlock(); renderer && renderer.setZone(0); ui && (ui.closeSheet(true), ui.toast('Fabrika yenilendi! +' + formatNum(a) + ' Yıldız')); break;
     case 'questReady': feedback.quest(); ui && ui.toast('Görev tamamlandı! Ödülünü al.'); break;
@@ -118,9 +120,26 @@ function loop(ts) {
 }
 
 relayout();
-if (loaded.status === 'recovered') ui.toast('Kayıt yedekten kurtarıldı');
-else if (loaded.status === 'corrupt') ui.toast('Kayıt okunamadı, yeni oyun başladı');
-else if (loaded.status === 'new') ui.toast('Makineye dokunarak üretimi hızlandır!');
+// Açılış ekranı: dokununca kapanır (aynı dokunuş sesi de başlatır). Durum mesajları ekran kapanınca gösterilir.
+let welcomeMsg = '';
+if (loaded.status === 'recovered') welcomeMsg = 'Kayıt yedekten kurtarıldı';
+else if (loaded.status === 'corrupt') welcomeMsg = 'Kayıt okunamadı, yeni oyun başladı';
+else if (loaded.status === 'new') welcomeMsg = 'Makineye dokunarak üretimi hızlandır!';
+const splash = document.getElementById('splash');
+if (splash) {
+  if (loaded.status === 'ok' || loaded.status === 'recovered') {
+    document.getElementById('sp-info').textContent = 'Fabrika Sv.' + factoryLevel(game.state).level + (game.income > 0 ? '  ·  ' + formatRate(game.income) + '/sn' : '');
+  }
+  const dismiss = () => {
+    if (splash.classList.contains('out')) return;
+    splash.classList.add('out'); feedback.unlock(); feedback.button();
+    setTimeout(() => splash.remove(), 600);
+    if (welcomeMsg) setTimeout(() => ui.toast(welcomeMsg), 350);
+  };
+  splash.addEventListener('pointerdown', dismiss);
+  window.addEventListener('keydown', dismiss, { once: true });
+  window.__mf_skipSplash = dismiss;
+}
 if (!handleOffline()) ui.maybeDaily();
 requestAnimationFrame((ts) => { last = ts; requestAnimationFrame(loop); });
 

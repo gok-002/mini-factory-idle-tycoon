@@ -1,9 +1,9 @@
 // Sabit boyutlu havuzlar: oyun döngüsünde nesne oluşturmadan parçacık ve yüzen yazı efektleri.
 import { FONT, OUT } from './draw.js';
 
-const N = 180, NF = 24;
+const N = 260, NF = 24;
 const PI2 = Math.PI * 2;
-export const K = { COIN: 0, CONFETTI: 1, PUFF: 2, STAR: 3, RING: 4, SPARK: 5 };
+export const K = { COIN: 0, CONFETTI: 1, PUFF: 2, STAR: 3, RING: 4, SPARK: 5, MOTE: 6, FLY: 7 };
 const COLORS = ['#ffd23f', '#ff6b6b', '#4ecdc4', '#7dffa0', '#9ad0ff', '#c39bff', '#ffffff', '#ff9f43'];
 export const C = { GOLD: 0, RED: 1, TEAL: 2, GREEN: 3, BLUE: 4, PURPLE: 5, WHITE: 6, ORANGE: 7 };
 
@@ -19,6 +19,8 @@ export class FX {
     this.fx = new Float32Array(NF); this.fy = new Float32Array(NF);
     this.flife = new Float32Array(NF); this.fcol = new Uint8Array(NF); this.fsize = new Float32Array(NF);
     this.fhead = 0;
+    this.target = { x: 0, y: 0 };   // K.FLY parçacıklarının hedefi (HUD para kutusu)
+    this.arrived = 0;                // hedefe varan uçan jeton sayısı (renderer okur ve sıfırlar)
   }
 
   spawn(kind, x, y, vx, vy, life, size, col) {
@@ -49,6 +51,13 @@ export class FX {
       const k = this.kind[i];
       if (k === K.COIN || k === K.CONFETTI || k === K.STAR || k === K.SPARK) this.vy[i] += 520 * dt;
       if (k === K.PUFF) this.vy[i] -= 20 * dt;
+      if (k === K.MOTE) this.vx[i] = Math.sin(this.rot[i] * 0.25) * 9;
+      if (k === K.FLY) {   // hedefe doğru kıvrılarak hızlanır
+        const dx = this.target.x - this.x[i], dy = this.target.y - this.y[i], d = Math.hypot(dx, dy) || 1;
+        if (d < 16) { this.life[i] = 0; this.arrived++; continue; }
+        const sp = 420 + (1 - this.life[i] / this.max[i]) * 700, a = Math.min(1, dt * 7);
+        this.vx[i] += (dx / d * sp - this.vx[i]) * a; this.vy[i] += (dy / d * sp - this.vy[i]) * a;
+      }
       this.x[i] += this.vx[i] * dt; this.y[i] += this.vy[i] * dt;
       this.rot[i] += dt * 6;
     }
@@ -63,11 +72,14 @@ export class FX {
       ctx.globalAlpha = Math.min(1, f * 1.6);
       ctx.fillStyle = COLORS[this.col[i]];
       ctx.save(); ctx.translate(this.x[i], this.y[i]);
-      if (k === K.COIN) {
+      if (k === K.COIN || k === K.FLY) {
         const sq = Math.abs(Math.cos(this.rot[i]));
         ctx.scale(Math.max(0.15, sq), 1);
         ctx.beginPath(); ctx.arc(0, 0, s, 0, PI2); ctx.fill();
         ctx.lineWidth = 1.5; ctx.strokeStyle = '#b8860b'; ctx.stroke();
+      } else if (k === K.MOTE) {
+        ctx.globalAlpha = Math.min(1, f * 2) * (0.35 + 0.35 * Math.sin(this.rot[i] * 1.5));
+        ctx.beginPath(); ctx.arc(0, 0, s, 0, PI2); ctx.fill();
       } else if (k === K.CONFETTI) {
         ctx.rotate(this.rot[i]); ctx.fillRect(-s, -s * 0.5, s * 2, s);
       } else if (k === K.PUFF) {

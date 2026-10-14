@@ -57,9 +57,16 @@ docs/MONETIZATION.md            ad / in-app purchase integration points (Turkish
 - **Quests**: 124 quests using a "ladder" system: only the next quest of each series is shown (produce, sell, income, level, zone, chapter quests...). Each reward can be claimed once.
 - **Golden Crate**: a crate that appears and vanishes on the scene; catch it for 40-100 seconds of income or a 20-second x3 frenzy boost.
 - **Daily gift**: a day streak (day 7 grants +1 Star). The gift button sits in the top corner.
-- **Patents / Renovate Factory** (appears once the first 3 zones are unlocked): reset progress to earn permanent **Patent Stars** (+10% income each). Spend stars on permanent patents: income, offline time/efficiency, tap power, machine discount, "Heritage Machines" (start a new run with ready-made machines) and Golden Crate frequency.
+- **Patents / Renovate Factory**: always visible in the bottom bar; while locked it shows the requirement (2B total earnings in the current run) and a progress bar. Once unlocked you can reset progress to earn permanent **Patent Stars** (+10% income each). Spend stars on permanent patents: income, offline time/efficiency, tap power, machine discount, "Heritage Machines" (start a new run with ready-made machines) and Golden Crate frequency.
 - **Settings**: sound, haptics, reset.
 - While offline, automated machines keep earning: up to 8 hours at 50% efficiency initially (up to 28 hours / 100% with patents).
+
+## Visuals
+
+Everything is drawn procedurally on canvas: animated wall scenery per chapter (clouds and sun beams, twinkling stars with shooting stars, glinting crystals,
+ticking clocks, neon waves, a spiral galaxy), per-chapter ambient particles, belt rollers and item shadows, steam from automated machines, a booth clerk who
+cheers on every sale, coins that fly to the money counter, a live portrait of the selected machine in the dock, chapter transition fades, a glossy button style
+and a splash screen (tap to start, which also unlocks audio and haptics).
 
 ## Tuning the economy
 
@@ -68,7 +75,7 @@ After changing values, run `npm run balance` to see the pacing report and `npm t
 
 ## Test results (run during development)
 
-`npm test` -> 48 tests, all passing. Coverage: starting values, production timing, belt/sales and money gain, manual/automated production,
+`npm test` -> 52 tests, all passing. Coverage: starting values, production timing, belt/sales and money gain, manual/automated production,
 blocking purchases with insufficient funds, double-tap protection, sequential machine/zone locks and level requirements, speed upgrades,
 storage limits, bulk level costs, offline earnings (efficiency, cap, double-claim prevention, clock rollback), one-time quest rewards,
 quest ladders and chapter quests, save/load, corrupt/missing/tampered saves, v1 -> v2 save migration, storage errors, NaN/Infinity guards,

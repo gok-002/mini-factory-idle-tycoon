@@ -2,11 +2,13 @@
 import { MACHINES, ZONES, QUESTS, UPGRADES, TUNING, PATENTS, PRESTIGE, DAILY } from '../core/config.js';
 import {
   cycleTime, itemValue, storageCap, levelUpCost, maxAffordableLevels, factoryLevel, machineIncome,
-  prestigeGain, patentLvl, patentCost, permMult,
+  prestigeGain, patentLvl, patentCost, permMult, prestigeUnlocked, prestigeProgress, prestigeNeed,
 } from '../core/economy.js';
 import { formatNum, formatRate, formatDuration } from '../core/format.js';
 import { questProgress, questDone, questClaimed, questReward, claimableCount, visibleQuests, completedCount } from '../core/quests.js';
 import { ICONS, hydrateIcons } from './icons.js';
+import { drawMachine } from '../render/draw.js';
+import { visualTier } from '../core/economy.js';
 
 const $ = (id) => document.getElementById(id);
 const MULTS = [1, 10, -1];
@@ -31,7 +33,10 @@ export class UI {
     this.n = {};
     for (const id of ['money', 'money-pill', 'income', 'flevel', 'flevel-bar', 'mc-name', 'mc-lv', 'mc-stats', 'btn-level', 'lvl-cost', 'lvl-lbl',
       'btn-mult', 'btn-buy', 'buy-cost', 'btn-up', 'up-hint', 'btn-quests', 'quest-badge', 'btn-zones', 'btn-settings', 'toast', 'sheet', 'sheet-title',
-      'sheet-body', 'sheet-close', 'backdrop', 'modal', 'zone-prev', 'zone-next', 'btn-daily', 'btn-patent', 'patent-hint', 'stars-chip', 'boost-chip']) this.n[id] = $(id);
+      'sheet-body', 'sheet-close', 'backdrop', 'modal', 'zone-prev', 'zone-next', 'btn-daily', 'btn-patent', 'patent-hint', 'stars-chip', 'boost-chip', 'mc-portrait']) this.n[id] = $(id);
+    this.portT = 0;
+    this.po = { color: '#fff', tier: 0, p: 0, t: 0, pulse: 0, auto: false, blocked: false, level: 1 };
+    renderer.onCoinArrive = () => this._popMoney();   // uçan jeton para kutusuna varınca küçük zıplama
     hydrateIcons();
     this._bind();
   }
@@ -333,6 +338,11 @@ export class UI {
 
   _buildPatent(body) {
     const g = this.game, s = g.state;
+    // Kilitliyken: şart + ilerleme çubuğu
+    const lockCard = el('div', 'lock-card', `<div class="lk-ico" data-icon="lock"></div><div class="lk-t">Patent Laboratuvarı kilitli</div>
+      <div class="lk-s">Açılması için bu koşuda <b class="need"></b> kazan.<br>Sonra fabrikanı yenileyip kalıcı <b>Patent Yıldızı</b> kazanırsın: her yıldız +%${Math.round(PRESTIGE.starBonus * 100)} gelir ve güçlü kalıcı geliştirmeler.</div>
+      <div class="prog big"><i></i></div><div class="lk-p"></div>`);
+    body.append(lockCard);
     const card = el('div', 'stat-card', '<div class="big"><span class="ico" data-icon="star"></span><span class="v1"></span></div><div class="sub s1"></div><div class="sub s2"></div>');
     body.append(card);
     const btn = el('button', 'btn btn-gold prestige', '<span class="lbl"></span><small></small>');
@@ -344,7 +354,8 @@ export class UI {
       this.confirm('Fabrikayı yenile?', `Para, makineler ve bölgeler sıfırlanır. Görevler, yıldızlar ve patentler kalır.<br><b>+${formatNum(gain)} ★</b> kazanırsın (gelir çarpanı x${formatRate(permMult(s))} → x${formatRate(after * (1 + 0.2 * patentLvl(s, 'income')))}).`,
         'Yenile!', () => { this.closeSheet(true); g.prestige(); });
     });
-    body.append(el('div', 'divider', 'Patentler (Yıldızla alınır)'));
+    const shopTitle = el('div', 'divider', 'Patentler (Yıldızla alınır)');
+    body.append(shopTitle);
     const rows = new Map();
     for (const p of PATENTS) {
       const row = el('div', 'row');
@@ -352,28 +363,49 @@ export class UI {
       const b = el('button', 'btn btn-gold', '<span class="lbl">AL</span><span class="cost"><span class="ico sm" data-icon="star"></span><i></i></span>');
       row.append(b); body.append(row);
       this._press(b, () => { if (!this._guard()) return; this._after(g.buyPatent(p.id), b); });
-      rows.set(p.id, { p, b, rt: row.querySelector('.rt'), cost: b.querySelector('.cost i'), costBox: b.querySelector('.cost'), lbl: b.querySelector('.lbl') });
+      rows.set(p.id, { p, row, b, rt: row.querySelector('.rt'), cost: b.querySelector('.cost i'), costBox: b.querySelector('.cost'), lbl: b.querySelector('.lbl') });
     }
-    body.append(el('div', 'note', 'Her Patent Yıldızı kalıcı olarak +%' + Math.round(PRESTIGE.starBonus * 100) + ' gelir verir. Yenilemeden önce daha fazla kazanırsan daha fazla yıldız alırsın.'));
+    const note = el('div', 'note', 'Her Patent Yıldızı kalıcı olarak +%' + Math.round(PRESTIGE.starBonus * 100) + ' gelir verir. Yenilemeden önce daha fazla kazanırsan daha fazla yıldız alırsın.');
+    body.append(note);
     return {
       update: () => {
-        const gain = prestigeGain(s);
-        setText(card.querySelector('.v1'), formatNum(s.meta.stars) + ' Yıldız');
-        setText(card.querySelector('.s1'), 'Gelir çarpanı: x' + formatRate(permMult(s)) + '  ·  Toplam ' + formatNum(s.meta.totalStars) + ' ★  ·  ' + s.meta.prestiges + ' yenileme');
-        setText(card.querySelector('.s2'), 'Bu koşuda kazanç: ' + formatNum(s.stats.runEarned));
-        btn.querySelector('.lbl').textContent = gain >= PRESTIGE.minGain ? 'FABRİKAYI YENİLE  +' + formatNum(gain) + ' ★' : 'Fabrikayı yenile (kilitli)';
-        btn.querySelector('small').textContent = gain >= PRESTIGE.minGain ? 'İlerleme sıfırlanır, kalıcı bonus kazanırsın' : formatNum(PRESTIGE.base) + ' kazanınca açılır';
-        btn.classList.toggle('cant', gain < PRESTIGE.minGain);
+        const open = prestigeUnlocked(s), gain = prestigeGain(s);
+        lockCard.hidden = open; card.hidden = !open; btn.hidden = !open;
+        shopTitle.textContent = open ? 'Patentler (Yıldızla alınır)' : 'Açılınca alabileceklerin';
+        if (!open) {
+          setText(lockCard.querySelector('.need'), formatNum(prestigeNeed()));
+          lockCard.querySelector('.prog i').style.width = (prestigeProgress(s) * 100).toFixed(1) + '%';
+          setText(lockCard.querySelector('.lk-p'), formatNum(s.stats.runEarned) + ' / ' + formatNum(prestigeNeed()));
+        } else {
+          setText(card.querySelector('.v1'), formatNum(s.meta.stars) + ' Yıldız');
+          setText(card.querySelector('.s1'), 'Gelir çarpanı: x' + formatRate(permMult(s)) + '  ·  Toplam ' + formatNum(s.meta.totalStars) + ' ★  ·  ' + s.meta.prestiges + ' yenileme');
+          setText(card.querySelector('.s2'), 'Bu koşuda kazanç: ' + formatNum(s.stats.runEarned));
+          btn.querySelector('.lbl').textContent = gain >= PRESTIGE.minGain ? 'FABRİKAYI YENİLE  +' + formatNum(gain) + ' ★' : 'Fabrikayı yenile (kilitli)';
+          btn.querySelector('small').textContent = gain >= PRESTIGE.minGain ? 'İlerleme sıfırlanır, kalıcı bonus kazanırsın' : formatNum(PRESTIGE.base) + ' kazanınca açılır';
+          btn.classList.toggle('cant', gain < PRESTIGE.minGain);
+        }
         for (const R of rows.values()) {
           const lvl = patentLvl(s, R.p.id), maxed = lvl >= R.p.max, cost = patentCost(R.p, lvl);
           setText(R.rt, R.p.name + '  ' + lvl + '/' + R.p.max);
-          R.costBox.hidden = maxed; setText(R.lbl, maxed ? 'MAKS' : 'AL');
+          R.row.classList.toggle('dim', !open);
+          R.costBox.hidden = maxed; setText(R.lbl, maxed ? 'MAKS' : !open ? 'KİLİTLİ' : 'AL');
           if (!maxed) setText(R.cost, formatNum(cost));
-          R.b.classList.toggle('cant', !maxed && s.meta.stars < cost);
+          R.b.classList.toggle('cant', !open || (!maxed && s.meta.stars < cost));
           R.b.classList.toggle('max', maxed);
         }
       },
     };
+  }
+
+  /** Dock'taki seçili makine portresi (canlı: ilerleme ve efektler oynar). */
+  _drawPortrait() {
+    const cv = this.n['mc-portrait'], ctx = cv.getContext('2d');
+    const g = this.game, i = g.state.selected, m = g.state.machines[i], def = MACHINES[i], r = g.rt[i], o = this.po;
+    o.color = def.color; o.tier = visualTier(m.level); o.p = r.progress > 1 ? 1 : r.progress; o.t = this.r.t;
+    o.pulse = r.pulse; o.auto = m.auto; o.blocked = r.blocked; o.level = m.level;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.translate(cv.width / 2, cv.height - 12);
+    drawMachine(ctx, def.kind, 78, 74, o);
   }
 
   /** Bugün alınabilir günlük hediye varsa gösterir. */
@@ -453,6 +485,8 @@ export class UI {
     }
     setText(this.n.money, formatNum(this.shownMoney));
     this.accum += dt;
+    this.portT += dt;
+    if (this.portT >= 0.05) { this.portT = 0; this._drawPortrait(); }
     if (this.accum >= 0.2) { this.accum = 0; this.update(); }
   }
 
@@ -516,10 +550,13 @@ export class UI {
     n['boost-chip'].hidden = !frenzy;
     if (frenzy) setText(n['boost-chip'], 'x' + formatRate(frenzy.mult) + ' · ' + Math.ceil((frenzy.until - Date.now()) / 1000) + 'sn');
     n['btn-daily'].hidden = !g.dailyStatus().available;
-    const gain = prestigeGain(s);
-    n['btn-patent'].hidden = !(s.meta.totalStars > 0 || s.meta.prestiges > 0 || gain >= PRESTIGE.minGain || s.zones[2].unlocked);
-    n['btn-patent'].classList.toggle('glow', gain >= PRESTIGE.minGain && gain >= s.meta.totalStars * 0.5);
-    setText(n['patent-hint'], gain >= PRESTIGE.minGain ? '+' + formatNum(gain) + ' ★' : '');
+    const gain = prestigeGain(s), pOpen = prestigeUnlocked(s), pb = n['btn-patent'];
+    pb.classList.toggle('locked', !pOpen);
+    pb.classList.toggle('glow', pOpen && gain >= PRESTIGE.minGain && gain >= s.meta.totalStars * 0.5);
+    setText(n['patent-hint'], pOpen ? (gain >= PRESTIGE.minGain ? '+' + formatNum(gain) + ' ★' : '') : '%' + Math.floor(prestigeProgress(s) * 100));
+    const pIcon = pb.querySelector('[data-icon]');
+    const want = pOpen ? 'star' : 'lock';
+    if (pIcon.dataset.icon !== want) { pIcon.dataset.icon = want; pIcon.innerHTML = ICONS[want]; }
 
     const claimable = claimableCount(s);
     n['quest-badge'].hidden = claimable === 0; setText(n['quest-badge'], String(claimable));

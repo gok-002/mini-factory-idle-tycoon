@@ -41,6 +41,7 @@
 
   <footer id="dock">
     <div class="mcard">
+      <canvas id="mc-portrait" width="112" height="112" aria-hidden="true"></canvas>
       <div class="mc-info">
         <div class="mc-name"><span id="mc-name">Blok Presi</span><b id="mc-lv">Sv.1</b></div>
         <div class="mc-stats" id="mc-stats"></div>
@@ -56,7 +57,7 @@
       <button id="btn-up" class="btn nav btn-blue"><span data-icon="wrench"></span><span class="t">Geliştir</span><small id="up-hint"></small></button>
       <button id="btn-quests" class="btn nav btn-purple"><span data-icon="target"></span><span class="t">Görevler</span><em id="quest-badge" class="badge" hidden>0</em></button>
       <button id="btn-zones" class="btn nav btn-teal"><span data-icon="map"></span><span class="t">Bölgeler</span></button>
-      <button id="btn-patent" class="btn nav btn-gold" hidden><span data-icon="star"></span><span class="t">Patent</span><small id="patent-hint"></small></button>
+      <button id="btn-patent" class="btn nav btn-gold locked"><span data-icon="star"></span><span class="t">Patent</span><small id="patent-hint"></small></button>
     </nav>
   </footer>
 
@@ -66,6 +67,17 @@
     <div id="sheet-body"></div>
   </section>
   <div id="modal" hidden></div>
+  <div id="splash">
+    <div class="sp-rays"></div>
+    <span class="sp-gear g1" data-icon="auto"></span><span class="sp-gear g2" data-icon="auto"></span><span class="sp-gear g3" data-icon="auto"></span>
+    <div class="sp-center">
+      <div class="sp-title"><span>MINI</span><span>FACTORY</span></div>
+      <div class="sp-sub">IDLE TYCOON</div>
+      <div class="sp-belt"><i></i><i></i><i></i><i></i></div>
+      <div class="sp-info" id="sp-info"></div>
+    </div>
+    <div class="sp-tap">Başlamak için dokun</div>
+  </div>
 </div>
 <script type="module" src="src/main.js"></script>
 <noscript>Bu oyun JavaScript gerektirir.</noscript>

@@ -133,6 +133,23 @@ export function prestigeGain(state) {
   return Number.isFinite(g) ? Math.max(0, g) : 0;
 }
 
+/** Patent Laboratuvarı açık mı: ilk yenilemeyi yapabilecek kadar kazanıldıysa (ya da daha önce açıldıysa). */
+export function prestigeUnlocked(state) {
+  return state.meta.prestiges > 0 || state.meta.totalStars > 0 || prestigeGain(state) >= PRESTIGE.minGain;
+}
+
+/** Kilit açılış ilerlemesi 0..1 (log ölçeği, 10.000 kazançtan başlar: gelir üstel büyüdüğü için çubuk "takılı kalmasın"). */
+export function prestigeProgress(state) {
+  const lo = 4, hi = Math.log10(prestigeNeed());
+  const e = Math.max(0, state.stats.runEarned);
+  return Math.max(0, Math.min(1, (Math.log10(1 + e) - lo) / (hi - lo)));
+}
+
+/** Kilidin açılması için gereken toplam kazanç (bu koşuda). */
+export function prestigeNeed() {
+  return PRESTIGE.base * Math.pow(PRESTIGE.minGain, 1 / PRESTIGE.exponent);
+}
+
 export function zoneUnlockCost(zoneIdx) {
   return ZONES[zoneIdx].unlockCost;
 }

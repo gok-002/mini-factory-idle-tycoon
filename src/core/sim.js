@@ -2,7 +2,7 @@
 import { TUNING, UPGRADES, MACHINES, ZONES, QUESTS, PRESTIGE, PATENTS, GOLDEN, DAILY, machineReq } from './config.js';
 import {
   cycleTime, itemValue, storageCap, incomePerSec, levelUpCost, maxAffordableLevels,
-  trackCost, trackMaxed, globalMult, tapSeconds, machineBuyCost, goldenIntervalMult, patentCost, patentLvl, prestigeGain,
+  trackCost, trackMaxed, globalMult, tapSeconds, machineBuyCost, goldenIntervalMult, patentCost, patentLvl, prestigeGain, prestigeUnlocked,
 } from './economy.js';
 import { createDefaultState } from './state.js';
 import { computeOffline } from './offline.js';
@@ -37,6 +37,7 @@ export class Game {
     this.gm = 1;
     this.income = 0;
     this.readyQuests = new Set();
+    this._patentOpen = prestigeUnlocked(state);    // Patent Laboratuvarı zaten açıksa açılış bildirimi verme
     this.refresh(Date.now());
     for (const q of QUESTS) if (questDone(state, q) && !questClaimed(state, q)) this.readyQuests.add(q.id);
   }
@@ -47,6 +48,7 @@ export class Game {
     this.gm = globalMult(s, nowMs);
     this.income = incomePerSec(s, this.gm);
     if (this.income > s.stats.maxIncome) s.stats.maxIncome = this.income;
+    if (!this._patentOpen && prestigeUnlocked(s)) { this._patentOpen = true; this.emit('patentUnlocked'); }
     this._checkQuests();
   }
 
