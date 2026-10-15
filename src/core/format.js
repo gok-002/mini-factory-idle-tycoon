@@ -30,3 +30,10 @@ export function formatDuration(sec) {
   if (m > 0) return m + ' dk ' + s + ' sn';
   return s + ' sn';
 }
+
+/** Uzun süreler için gün + saat: 3 gün 4 sa; kısalar formatDuration gibi. */
+export function formatLong(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  if (sec < 86400) return formatDuration(sec);
+  return Math.floor(sec / 86400) + ' gün ' + Math.floor((sec % 86400) / 3600) + ' sa';
+}

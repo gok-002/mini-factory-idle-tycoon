@@ -6,6 +6,13 @@ import {
 } from '../core/economy.js';
 import { formatNum, formatRate, formatDuration } from '../core/format.js';
 import { questProgress, questDone, questClaimed, questReward, claimableCount, visibleQuests, completedCount } from '../core/quests.js';
+import { STAFF, RESEARCH, RESEARCH_BRANCHES, RESEARCH_DIV, PRODUCT_NAMES, CATALOG_TIERS, CATALOG_BONUS, THEMES, ASCEND, STAFF_UNLOCK_MACHINES } from '../core/config.js';
+import { staffLvl, rdLvl, rdCost, rpEarned, rpAvail, rdOpen, catTiers, catTiersOf, catMult, ascendGain, coreMult, calendarAt } from '../core/economy.js';
+import { drawProduct } from '../render/draw.js';
+import { themedColor } from '../render/theme.js';
+import { getLang, setLang } from '../i18n.js';
+import { makeCard } from './card.js';
+import { formatLong } from '../core/format.js';
 import { achProgress, achDone } from '../core/achievements.js';
 import { encodeSave, decodeSave } from '../core/savecode.js';
 import { ICONS, hydrateIcons } from './icons.js';
@@ -55,7 +62,8 @@ export class UI {
     for (const id of ['money', 'money-pill', 'income', 'flevel', 'flevel-bar', 'mc-name', 'mc-lv', 'mc-stats', 'btn-level', 'lvl-cost', 'lvl-lbl',
       'btn-mult', 'btn-buy', 'buy-cost', 'btn-up', 'up-hint', 'btn-quests', 'quest-badge', 'btn-zones', 'btn-settings', 'toast', 'sheet', 'sheet-title',
       'sheet-body', 'sheet-close', 'backdrop', 'modal', 'zone-prev', 'zone-next', 'btn-daily', 'btn-patent', 'patent-hint', 'stars-chip', 'boost-chip', 'mc-portrait',
-      'rush', 'rush-name', 'rush-time', 'rush-fill', 'rush-tbar', 'notice', 'coach', 'coach-text', 'app']) this.n[id] = $(id);
+      'rush', 'rush-name', 'rush-time', 'rush-fill', 'rush-tbar', 'notice', 'coach', 'coach-text', 'app',
+      'btn-hub', 'evt', 'evt-name', 'evt-time', 'evt-fill', 'evt-tbar']) this.n[id] = $(id);
     this.qTab = 'quests';
     this.noticeQ = [];
     this.noticeShown = 0;
@@ -101,6 +109,11 @@ export class UI {
     this._press(n['btn-settings'], () => { this.fb.button(); this.openSheet('settings'); });
     this._press(n['btn-patent'], () => { this.fb.button(); this.openSheet('patent'); });
     this._press(n['btn-daily'], () => { this.fb.button(); this.showDaily(); });
+    this._press(n['btn-hub'], () => { this.fb.button(); this.openSheet('hub'); });
+    n.evt.addEventListener('pointerdown', (e) => {          // Elektrik kesintisi: sigorta kutusuna hızlı dokunuşlar
+      e.preventDefault(); this.fb.unlock();
+      if (g.event && g.event.type === 'blackout') { g.repairEvent(); this.fb.tap(); this.update(); }
+    });
     this._press(n['sheet-close'], () => this.closeSheet());
     this._press(n['backdrop'], () => this.closeSheet());
     this._press(n['zone-prev'], () => this.stepZone(-1));
@@ -115,6 +128,7 @@ export class UI {
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
       if (this.r.hitGolden(px, py)) { g.collectGolden(); this.update(); return; }   // Altın Kasa
+      if (g.dark) { this.fb.deny(); this.toast('Elektrik kesintisi! Üstteki banda dokunarak onar.'); return; }
       const h = this.r.hit(px, py);
       if (!h) return;
       const m = g.state.machines[h.machine];
@@ -185,8 +199,15 @@ export class UI {
       settings: () => this._buildSettings(body),
       patent: () => this._buildPatent(body),
       stats: () => this._buildStats(body),
+      hub: () => this._buildHub(body),
+      staff: () => this._buildStaff(body),
+      research: () => this._buildResearch(body),
+      catalog: () => this._buildCatalog(body),
+      themes: () => this._buildThemes(body),
+      events: () => this._buildEvents(body),
     };
-    const titles = { upgrades: 'Geliştir', quests: 'Hedefler', zones: 'Fabrika Bölgeleri', settings: 'Ayarlar', patent: 'Patent Laboratuvarı', stats: 'İstatistikler' };
+    const titles = { upgrades: 'Geliştir', quests: 'Hedefler', zones: 'Fabrika Bölgeleri', settings: 'Ayarlar', patent: 'Patent Laboratuvarı', stats: 'İstatistikler',
+      hub: 'Fabrika Merkezi', staff: 'Çalışanlar', research: 'Ar-Ge', catalog: 'Ürün Kataloğu', themes: 'Temalar', events: 'Etkinlikler' };
     n['sheet-title'].textContent = titles[name];
     this.sheet = builders[name]();
     this.sheet.name = name;
@@ -391,6 +412,15 @@ export class UI {
     mk('Ses efektleri', 'sound');
     mk('Müzik', 'music');
     mk('Titreşim', 'haptics');
+    const lrow = el('div', 'setting', '<span>Dil / Language</span>');
+    const lbtn = el('button', 'chip lang', getLang() === 'en' ? 'English' : 'Türkçe');
+    lrow.append(lbtn); body.append(lrow);
+    this._press(lbtn, () => {
+      const next = getLang() === 'en' ? 'tr' : 'en';
+      s.lang = next; setLang(next);
+      lbtn.textContent = next === 'en' ? 'English' : 'Türkçe';
+      this.fb.button(); this.hooks.save && this.hooks.save();
+    });
     const stats = el('button', 'btn btn-blue wide', 'İstatistikler');
     const code = el('button', 'btn btn-purple wide', 'Kayıt Kodu (Yedekle / Yükle)');
     body.append(stats, code);
@@ -432,6 +462,15 @@ export class UI {
       this._press(b, () => { if (!this._guard()) return; this._after(g.buyPatent(p.id), b); });
       rows.set(p.id, { p, row, b, rt: row.querySelector('.rt'), cost: b.querySelector('.cost i'), costBox: b.querySelector('.cost'), lbl: b.querySelector('.lbl') });
     }
+    const asc = el('div', 'stat-card asc', '<div class="big"><span class="ico" data-icon="core"></span><span class="v1"></span></div><div class="sub s1"></div><div class="sub s2"></div><div class="prog big"><i></i></div>');
+    const ascBtn = el('button', 'btn btn-purple prestige', '<span class="lbl"></span><small></small>');
+    body.append(asc, ascBtn);
+    this._press(ascBtn, () => {
+      const gain = ascendGain(s);
+      if (gain < 1) { this.fb.deny(); this.toast('Daha fazla Patent Yıldızı biriktirmelisin'); return; }
+      this.confirm('Galaktik Genişleme?', `Yıldızlar, patentler, çalışanlar ve fabrika sıfırlanır. Rozetler, Ar-Ge ve katalog kalır.<br><b>+${gain} Kozmik Çekirdek</b>: her çekirdek geliri +%${Math.round(ASCEND.coreIncome * 100)} artırır ve yıldızların etkisini +%${Math.round(ASCEND.coreStar * 100)} güçlendirir.`,
+        'Genişle!', () => { this.closeSheet(true); g.ascend(); });
+    });
     const note = el('div', 'note', 'Her Patent Yıldızı kalıcı olarak +%' + Math.round(PRESTIGE.starBonus * 100) + ' gelir verir. Yenilemeden önce daha fazla kazanırsan daha fazla yıldız alırsın.');
     body.append(note);
     return {
@@ -450,6 +489,18 @@ export class UI {
           btn.querySelector('.lbl').textContent = gain >= PRESTIGE.minGain ? 'FABRİKAYI YENİLE  +' + formatNum(gain) + ' ★' : 'Fabrikayı yenile (kilitli)';
           btn.querySelector('small').textContent = gain >= PRESTIGE.minGain ? 'İlerleme sıfırlanır, kalıcı bonus kazanırsın' : formatNum(PRESTIGE.base) + ' kazanınca açılır';
           btn.classList.toggle('cant', gain < PRESTIGE.minGain);
+        }
+        const showAsc = open && (s.meta.lifeStars > 0 || s.meta.cores > 0), ag = ascendGain(s), cores = s.meta.cores;
+        asc.hidden = ascBtn.hidden = !showAsc;
+        if (showAsc) {
+          const nextNeed = ASCEND.need * (cores + 1) * (cores + 1);
+          setText(asc.querySelector('.v1'), 'Kozmik Çekirdek: ' + cores);
+          setText(asc.querySelector('.s1'), 'Gelir x' + formatRate(coreMult(s)) + '  ·  Yıldız etkisi +%' + Math.round(cores * ASCEND.coreStar * 100));
+          setText(asc.querySelector('.s2'), 'Ömür boyu yıldız ' + formatNum(s.meta.lifeStars) + ' / ' + formatNum(nextNeed));
+          asc.querySelector('.prog i').style.width = Math.min(100, s.meta.lifeStars / nextNeed * 100).toFixed(1) + '%';
+          ascBtn.querySelector('.lbl').textContent = ag >= 1 ? 'GALAKTİK GENİŞLEME  +' + ag : 'Galaktik Genişleme (kilitli)';
+          ascBtn.querySelector('small').textContent = ag >= 1 ? 'Yıldızlar ve patentler sıfırlanır, çekirdek kazanırsın' : formatNum(nextNeed) + ' ömür boyu yıldızda açılır';
+          ascBtn.classList.toggle('cant', ag < 1);
         }
         for (const R of rows.values()) {
           const lvl = patentLvl(s, R.p.id), maxed = lvl >= R.p.max, cost = patentCost(R.p, lvl);
@@ -578,7 +629,7 @@ export class UI {
       ['Rozetler', () => achCount(s) + '/' + ACHIEVEMENTS.length],
       ['Yenileme  /  Patent Yıldızı', () => s.meta.prestiges + '  /  ' + formatNum(s.meta.totalStars)],
       ['Çevrimdışı kazanç', () => formatNum(st.offlineEarned)],
-      ['Başlangıç', () => new Date(s.createdAt).toLocaleDateString('tr-TR')],
+      ['Başlangıç', () => new Date(s.createdAt).toLocaleDateString(getLang() === 'en' ? 'en-US' : 'tr-TR')],
     ];
     const cells = defs.map(([label, fn]) => {
       const row = el('div', 'stat-row', `<span>${label}</span><b></b>`);
@@ -679,11 +730,223 @@ export class UI {
     c.style.setProperty('--ax', (half + tx - cx).toFixed(0) + 'px');
   }
 
+  // ============================================================ Fabrika Merkezi
+  _back(body) {
+    const b = el('button', 'chip back', '‹ Merkez');
+    body.append(b);
+    this._press(b, () => { this.fb.button(); this.openSheet('hub'); });
+  }
+
+  _buildHub(body) {
+    const g = this.game, s = g.state;
+    const grid = el('div', 'tiles');
+    body.append(grid);
+    const total = Object.keys(PRODUCT_NAMES).length * CATALOG_TIERS.length;
+    const defs = [
+      ['staff', 'staff', 'Çalışanlar', () => (g.staffUnlocked() ? 'Toplam seviye ' + Object.values(s.staff).reduce((a, b) => a + b, 0) : STAFF_UNLOCK_MACHINES + ' makine gerekli')],
+      ['research', 'flask', 'Ar-Ge', () => formatNum(rpAvail(s)) + ' puan'],
+      ['catalog', 'book', 'Katalog', () => catTiers(s) + '/' + total + ' eşik'],
+      ['themes', 'palette', 'Temalar', () => THEMES[s.theme].name],
+      ['events', 'cal', 'Etkinlikler', () => calendarAt(Date.now()).list.length + ' aktif'],
+      ['card', 'share', 'Fabrika Kartı', () => 'Resim olarak paylaş'],
+    ];
+    const cells = defs.map(([id, icon, title, sub]) => {
+      const b = el('button', 'tile', `<span class="ti" data-icon="${icon}"></span><span class="tt">${title}</span><small></small>`);
+      grid.append(b);
+      this._press(b, () => { this.fb.button(); if (id === 'card') this.showCard(); else this.openSheet(id); });
+      return { b, sub, small: b.querySelector('small') };
+    });
+    return { update: () => { for (const c of cells) setText(c.small, c.sub()); } };
+  }
+
+  _buildStaff(body) {
+    const g = this.game, s = g.state;
+    this._back(body);
+    const lock = el('div', 'lock-card', `<div class="lk-ico" data-icon="lock"></div><div class="lk-t">Çalışanlar kilitli</div><div class="lk-s">En az <b>${STAFF_UNLOCK_MACHINES} makine</b> kurunca işe alım başlar.</div>`);
+    body.append(lock);
+    const rows = new Map();
+    for (const r of STAFF) {
+      const row = el('div', 'row');
+      row.innerHTML = `<div class="ri sm" data-icon="staff"></div><div class="rm"><div class="rt"></div><div class="rs">${r.desc}</div></div>`;
+      const b = el('button', 'btn btn-blue', '<span class="lbl">İŞE AL</span><span class="cost"><span class="ico sm" data-icon="coin"></span><i></i></span>');
+      row.append(b); body.append(row);
+      this._press(b, () => { if (!this._guard()) return; this._after(g.buyStaff(r.id), b); });
+      rows.set(r.id, { r, row, b, rt: row.querySelector('.rt'), cost: b.querySelector('.cost i'), costBox: b.querySelector('.cost'), lbl: b.querySelector('.lbl') });
+    }
+    body.append(el('div', 'note', 'Çalışanlar para ile işe alınır; fabrikayı yenilediğinde ayrılırlar. Fiyatlar gelirinle birlikte büyür.'));
+    return {
+      update: () => {
+        const open = g.staffUnlocked();
+        lock.hidden = open;
+        for (const R of rows.values()) {
+          const lvl = staffLvl(s, R.r.id), maxed = lvl >= R.r.max, cost = g.staffCostOf(R.r.id);
+          setText(R.rt, R.r.name + '  ' + lvl + '/' + R.r.max);
+          R.row.classList.toggle('dim', !open);
+          R.costBox.hidden = maxed || !open;
+          setText(R.lbl, maxed ? 'MAKS' : !open ? 'KİLİTLİ' : 'İŞE AL');
+          if (!maxed && open) setText(R.cost, formatNum(cost));
+          R.b.classList.toggle('cant', !open || (!maxed && !g.canAfford(cost)));
+          R.b.classList.toggle('max', maxed);
+        }
+      },
+    };
+  }
+
+  _buildResearch(body) {
+    const g = this.game, s = g.state;
+    this._back(body);
+    const card = el('div', 'stat-card', '<div class="big"><span class="ico" data-icon="flask"></span><span class="v1"></span></div><div class="sub s1"></div>');
+    body.append(card);
+    const rows = new Map();
+    for (const br of Object.keys(RESEARCH_BRANCHES)) {
+      body.append(el('div', 'divider', RESEARCH_BRANCHES[br]));
+      for (const n of RESEARCH.filter((x) => x.branch === br)) {
+        const row = el('div', 'row');
+        row.innerHTML = `<div class="ri sm" data-icon="flask"></div><div class="rm"><div class="rt"></div><div class="rs"></div></div>`;
+        const b = el('button', 'btn btn-teal', '<span class="lbl">AÇ</span><span class="cost"><span class="ico sm" data-icon="flask"></span><i></i></span>');
+        row.append(b); body.append(row);
+        this._press(b, () => { if (!this._guard()) return; this._after(g.buyResearch(n.id), b); });
+        rows.set(n.id, { n, row, b, rt: row.querySelector('.rt'), rs: row.querySelector('.rs'), cost: b.querySelector('.cost i'), costBox: b.querySelector('.cost'), lbl: b.querySelector('.lbl') });
+      }
+    }
+    body.append(el('div', 'note', 'Araştırma puanı toplam üretimden gelir ve kalıcıdır (yeniden doğuşta korunur). Bir dalda ilerlemek için önceki düğümü yükseltmelisin.'));
+    return {
+      update: () => {
+        const earned = rpEarned(s), nextAt = (earned + 1) * (earned + 1) * RESEARCH_DIV;
+        setText(card.querySelector('.v1'), formatNum(rpAvail(s)) + ' Araştırma Puanı');
+        setText(card.querySelector('.s1'), 'Toplam kazanılan ' + earned + '  ·  sonraki puan: ' + formatNum(Math.max(0, nextAt - s.stats.produced)) + ' ürün daha');
+        for (const R of rows.values()) {
+          const lvl = rdLvl(s, R.n.id), maxed = lvl >= R.n.max, open = rdOpen(s, R.n), cost = rdCost(R.n, lvl);
+          setText(R.rt, R.n.name + '  ' + lvl + '/' + R.n.max);
+          const req = R.n.req && RESEARCH.find((x) => x.id === R.n.req[0]);
+          setText(R.rs, R.n.desc + (open || !req ? '' : '  ·  Kilitli: ' + req.name + ' Sv.' + R.n.req[1]));
+          R.row.classList.toggle('dim', !open);
+          R.costBox.hidden = maxed || !open;
+          setText(R.lbl, maxed ? 'MAKS' : !open ? 'KİLİTLİ' : 'AÇ');
+          if (!maxed && open) setText(R.cost, String(cost));
+          R.b.classList.toggle('cant', !open || (!maxed && rpAvail(s) < cost));
+          R.b.classList.toggle('max', maxed);
+        }
+      },
+    };
+  }
+
+  _buildCatalog(body) {
+    const s = this.game.state;
+    this._back(body);
+    const head = el('div', 'divider');
+    const grid = el('div', 'cat-grid');
+    body.append(head, grid);
+    const keys = Object.keys(PRODUCT_NAMES), total = keys.length * CATALOG_TIERS.length;
+    const cards = keys.map((k) => {
+      const def = MACHINES.find((m) => m.product === k);
+      const card = el('div', 'cat-card', `<canvas width="56" height="56"></canvas><div class="cn">${PRODUCT_NAMES[k]}</div><div class="cc"></div><div class="pips">${CATALOG_TIERS.map(() => '<b></b>').join('')}</div><div class="prog"><i></i></div>`);
+      grid.append(card);
+      const ctx = card.querySelector('canvas').getContext('2d');
+      ctx.translate(28, 40); drawProduct(ctx, k, 0, 0, 34, def ? def.color : '#aab');
+      return { k, cc: card.querySelector('.cc'), pips: [...card.querySelectorAll('.pips b')], bar: card.querySelector('.prog i') };
+    });
+    body.append(el('div', 'note', 'Her ürün türünden belirli sayıda satınca bir katalog eşiği tamamlanır (' + CATALOG_TIERS.map((x) => formatNum(x)).join(', ') + '). Her eşik kalıcı +%' + (CATALOG_BONUS * 100).toFixed(1).replace('.', ',') + ' gelir verir.'));
+    return {
+      update: () => {
+        setText(head, 'Katalog ' + catTiers(s) + '/' + total + ' eşik  ·  Gelir bonusu +%' + ((catMult(s) - 1) * 100).toFixed(1));
+        for (const C of cards) {
+          const count = s.catalog[C.k] || 0, n = catTiersOf(count);
+          setText(C.cc, formatNum(count) + ' satıldı');
+          C.pips.forEach((p, i) => p.classList.toggle('on', i < n));
+          const lo = n ? CATALOG_TIERS[n - 1] : 0, hi = CATALOG_TIERS[n];
+          C.bar.style.width = (hi ? Math.min(100, (count - lo) / (hi - lo) * 100) : 100).toFixed(1) + '%';
+        }
+      },
+    };
+  }
+
+  _buildThemes(body) {
+    const g = this.game, s = g.state;
+    this._back(body);
+    const rows = [];
+    for (const [id, t] of Object.entries(THEMES)) {
+      const row = el('div', 'row');
+      row.innerHTML = `<div class="swatch"><i></i><b></b></div><div class="rm"><div class="rt">${t.name}</div><div class="rs"></div></div>`;
+      const sw = row.querySelector('.swatch');
+      sw.style.background = (t.tint ? 'linear-gradient(' + t.tint + ',' + t.tint + '),' : '') + '#e9d9bd';
+      sw.querySelector('b').style.background = t.belt || '#4a5568';
+      sw.querySelector('i').style.background = themedColor(id, '#ff8a3d');
+      const b = el('button', 'btn btn-green', '<span class="lbl"></span>');
+      row.append(b); body.append(row);
+      this._press(b, () => { if (!this._guard()) return; if (g.setTheme(id)) { this.fb.upgrade(); this.update(); } else { this.fb.deny(); this.toast('Bu tema için ' + t.badges + ' rozet gerekli'); } });
+      rows.push({ id, t, row, b, rs: row.querySelector('.rs'), lbl: b.querySelector('.lbl') });
+    }
+    body.append(el('div', 'note', 'Temalar rozet kazandıkça açılır ve yalnızca görünümü değiştirir.'));
+    return {
+      update: () => {
+        const n = achCount(s);
+        for (const R of rows) {
+          const have = n >= R.t.badges, cur = s.theme === R.id;
+          setText(R.rs, have ? (cur ? 'Kullanılıyor' : 'Açık') : 'Rozet ' + n + '/' + R.t.badges);
+          setText(R.lbl, cur ? 'SEÇİLİ' : have ? 'SEÇ' : 'KİLİTLİ');
+          R.b.classList.toggle('max', cur); R.b.classList.toggle('cant', !have);
+          R.row.classList.toggle('dim', !have);
+        }
+      },
+    };
+  }
+
+  _buildEvents(body) {
+    const s = this.game.state;
+    this._back(body);
+    body.append(el('div', 'divider', 'Şu an aktif'));
+    const act = el('div', '');
+    body.append(act);
+    body.append(el('div', 'divider', 'Fabrika olayları'));
+    for (const [icon, name, desc] of [
+      ['bolt', 'Talep Patlaması', 'Bir süre boyunca gelirin x2 olur.'],
+      ['star', 'VIP Müşteri', 'Kısa süreliğine gelirin x3 olur.'],
+      ['wrench', 'Elektrik Kesintisi', 'Üretim durur. Üstteki banda 8 kez dokunarak onar, ödül kazan.'],
+    ]) {
+      const row = el('div', 'row', `<div class="ri sm" data-icon="${icon}"></div><div class="rm"><div class="rt">${name}</div><div class="rs">${desc}</div></div>`);
+      body.append(row);
+    }
+    const note = el('div', 'note');
+    body.append(note);
+    let key = '';
+    return {
+      update: () => {
+        const list = calendarAt(Date.now()).list, now = Date.now();
+        const k = list.map((e) => e.id).join();
+        if (k !== key) {
+          key = k; act.innerHTML = '';
+          for (const e of list) act.append(el('div', 'row', `<div class="ri sm" data-icon="cal"></div><div class="rm"><div class="rt">${e.name}</div><div class="rs">${e.desc}<span class="left"></span></div></div>`));
+          hydrateIcons(act);
+        }
+        const lefts = act.querySelectorAll('.left');
+        list.forEach((e, i) => { if (lefts[i]) setText(lefts[i], '  ·  ' + formatLong((e.until - now) / 1000) + ' kaldı'); });
+        setText(note, 'Atlattığın fabrika olayı: ' + s.stats.eventsDone + '. Olaylar rastgele aralıklarla gelir; çevrimdışıyken beklemez.');
+      },
+    };
+  }
+
+  // ------------------------------------------------------------ fabrika kartı
+  showCard() {
+    const cv = makeCard(this.game, this.r), url = cv.toDataURL('image/png');
+    const c = this._modal('<h3>Fabrika Kartı</h3><img class="card-img" alt="Fabrika kartı"><div class="btns"><button class="btn btn-blue half" data-x="share">Paylaş</button><button class="btn btn-green half" data-x="ok">Kapat</button></div>');
+    c.querySelector('img').src = url;
+    c.querySelector('[data-x=ok]').onclick = () => this.closeModal();
+    c.querySelector('[data-x=share]').onclick = () => {
+      cv.toBlob((blob) => {
+        if (!blob) { this.toast('Resim oluşturulamadı'); return; }
+        const file = new File([blob], 'mini-factory.png', { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file], title: 'Mini Factory', text: 'Mini Factory: Idle Tycoon' }).catch(() => {});
+        else { const a = document.createElement('a'); a.href = url; a.download = 'mini-factory.png'; a.click(); this.toast('Resim indirildi'); }
+      }, 'image/png');
+    };
+  }
+
   /** Dock'taki seçili makine portresi (canlı: ilerleme ve efektler oynar). */
   _drawPortrait() {
     const cv = this.n['mc-portrait'], ctx = cv.getContext('2d');
     const g = this.game, i = g.state.selected, m = g.state.machines[i], def = MACHINES[i], r = g.rt[i], o = this.po;
-    o.color = def.color; o.tier = visualTier(m.level); o.p = r.progress > 1 ? 1 : r.progress; o.t = this.r.t;
+    o.color = themedColor(g.state.theme, def.color); o.tier = visualTier(m.level); o.p = r.progress > 1 ? 1 : r.progress; o.t = this.r.t;
     o.pulse = r.pulse; o.auto = m.auto; o.blocked = r.blocked; o.level = m.level;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.translate(cv.width / 2, cv.height - 12);
@@ -852,6 +1115,18 @@ export class UI {
       n['rush-fill'].style.width = Math.min(100, rush.got / rush.target * 100).toFixed(1) + '%';
       n['rush-tbar'].style.width = Math.max(0, rush.ttl / rush.max * 100).toFixed(1) + '%';
       n.rush.classList.toggle('urgent', rush.ttl < 8);
+    }
+    // fabrika olayı bandı (Acil Sipariş bandı varsa altına iner)
+    const ev = g.event, eb = n.evt;
+    eb.hidden = !ev;
+    if (ev) {
+      eb.classList.toggle('low', !!g.rush);
+      eb.dataset.type = ev.type;
+      const nm = ev.type === 'blackout' ? 'KESİNTİ! Sigortaya dokun ' + ev.taps + '/' + ev.need : ev.type === 'vip' ? 'VIP MÜŞTERİ  x3 gelir' : 'TALEP PATLAMASI  x2 gelir';
+      setText(n['evt-name'], nm);
+      setText(n['evt-time'], Math.ceil(ev.ttl) + ' sn');
+      n['evt-fill'].style.width = (ev.type === 'blackout' ? ev.taps / ev.need * 100 : 100).toFixed(1) + '%';
+      n['evt-tbar'].style.width = Math.max(0, ev.ttl / ev.max * 100).toFixed(1) + '%';
     }
     this._coach();
 

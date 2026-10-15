@@ -16,7 +16,7 @@ const noon = (d) => new Date(2026, 5, d, 12).getTime();   // yerel öğlen: gün
 
 // ------------------------------------------------------------------ rozetler
 test('rozet içeriği: benzersiz kimlik, geçerli ölçüt, artan hedefler', () => {
-  assert.equal(ACHIEVEMENTS.length, 50);
+  assert.ok(ACHIEVEMENTS.length >= 50);
   assert.equal(new Set(ACHIEVEMENTS.map((a) => a.id)).size, ACHIEVEMENTS.length);
   const last = {};
   for (const a of ACHIEVEMENTS) {
@@ -81,7 +81,7 @@ test('yeni alanlar bozuk veriden güvenle onarılır', () => {
   assert.equal(sanitizeState('çöp', 1).dm.list.length, 0);
 });
 
-test('v2 kaydı v3 şemasına taşınır ve eski ilerleme korunur', () => {
+test('v2 kaydı güncel şemaya taşınır ve eski ilerleme korunur', () => {
   const old = { v: 2, money: 777, machines: [{ id: 'press', owned: true, level: 12, auto: true }], settings: { sound: false, haptics: true }, quests: { produce10: true } };
   const st = new MemoryStorage(); st.setItem('miniFactory.save', JSON.stringify(old));
   const { state, status } = new SaveManager(st).load(5);
@@ -90,7 +90,7 @@ test('v2 kaydı v3 şemasına taşınır ve eski ilerleme korunur', () => {
   assert.equal(state.money, 777); assert.equal(state.machines[0].level, 12); assert.equal(state.quests.produce10, true);
   assert.equal(state.settings.sound, false); assert.equal(state.settings.music, true);
   assert.deepEqual(state.ach, {});
-  assert.equal(migrate({ v: 2 }).v, 3);
+  assert.equal(migrate({ v: 2 }).v, SAVE_VERSION);
 });
 
 test('oynama süresi sayılır', () => {

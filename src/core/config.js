@@ -3,7 +3,7 @@
 
 import { formatNum } from './format.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const SAVE_KEY = 'miniFactory.save';
 
 export const TUNING = {
@@ -205,6 +205,11 @@ const ACH_DESC = {
   rushDone:     (n) => `${n} Acil Sipariş tamamla`,
   missionsDone: (n) => `${n} günlük görev tamamla`,
   dailyStreak:  (n) => `Günlük hediyede ${n} günlük seri yap`,
+  eventsDone:   (n) => `${n} fabrika olayı atlat`,
+  staffTotal:   (n) => `Çalışanlara toplam ${n} seviye ver`,
+  rdTotal:      (n) => `Ar-Ge'de toplam ${n} seviye aç`,
+  catalogTiers: (n) => `Katalogda ${n} eşik tamamla`,
+  cores:        (n) => `${n} Kozmik Çekirdek kazan`,
 };
 export const ACHIEVEMENTS = [];
 const A = (metric, rungs) => rungs.forEach(([target, id, title], k) => ACHIEVEMENTS.push({
@@ -226,6 +231,11 @@ A('totalStars',   [[5, 'a_star1', 'Yıldız Tozu'], [50, 'a_star2', 'Takım Yıl
 A('rushDone',     [[1, 'a_rush1', 'Acil Servis'], [10, 'a_rush2', 'Hızlı Teslimat'], [50, 'a_rush3', 'Kurye Efsanesi']]);
 A('missionsDone', [[3, 'a_msn1', 'Görev Adamı'], [30, 'a_msn2', 'Düzenli Çalışan'], [150, 'a_msn3', 'Vardiya Şefi']]);
 A('dailyStreak',  [[7, 'a_streak', 'Sadık Çalışan']]);
+A('eventsDone',   [[1, 'a_evt1', 'Olay Yönetimi'], [25, 'a_evt2', 'Kriz Yöneticisi']]);
+A('staffTotal',   [[1, 'a_staff1', 'İlk Çalışan'], [15, 'a_staff2', 'İK Müdürü'], [40, 'a_staff3', 'Dev Kadro']]);
+A('rdTotal',      [[1, 'a_rd1', 'Laboratuvar Önlüğü'], [20, 'a_rd2', 'Baş Bilim İnsanı']]);
+A('catalogTiers', [[1, 'a_cat1', 'Koleksiyoncu'], [10, 'a_cat2', 'Katalog Ustası'], [40, 'a_cat3', 'Tam Katalog']]);
+A('cores',        [[1, 'a_core1', 'Kozmik Çekirdek'], [3, 'a_core2', 'Galaksiler Ötesi']]);
 
 // ---------------------------------------------------------------- Günlük görevler
 // Her gün (yerel takvim günü) havuzdan 3 görev seçilir; hepsi bitince sandık açılır.
@@ -254,6 +264,74 @@ export const RUSH = {
   rewardSecs: 100, rewardMin: 500,  // ödül = max(rewardMin, gelir x rewardSecs, ürün değeri x hedef x 3)
 };
 
+// ---------------------------------------------------------------- Çalışanlar
+// Para ile işe alınır, her biri kalıcı (koşu boyunca) bir yetenek verir. Fiyat = max(gelirin 30 sn'si, son makinenin yarı fiyatı) x mul x growth^seviye.
+export const STAFF_UNLOCK_MACHINES = 3;
+export const STAFF = [
+  { id: 'cashier', name: 'Kasiyer',            desc: 'Gelir +%4',                                   max: 15, mul: 2, growth: 1.55 },
+  { id: 'night',   name: 'Gece Bekçisi',       desc: 'Çevrimdışı süre +1 saat',                     max: 8,  mul: 3, growth: 1.7 },
+  { id: 'shift',   name: 'Vardiya Amiri',      desc: 'Çevrimdışı verim +%3',                        max: 10, mul: 3, growth: 1.6 },
+  { id: 'tech',    name: 'Teknisyen',          desc: 'Altın Kasa\'yı kendiliğinden toplar (seviye arttıkça daha çabuk)', max: 5, mul: 5, growth: 2.0 },
+  { id: 'sales',   name: 'Satış Müdürü',       desc: 'Acil Sipariş: ödül +%20, süre +3 sn',         max: 5,  mul: 4, growth: 1.9 },
+  { id: 'coach',   name: 'Tezgahtar Eğitmeni', desc: 'Dokunuş gücü +0,1 sn',                        max: 10, mul: 2, growth: 1.5 },
+];
+
+// ---------------------------------------------------------------- Ar-Ge ağacı
+// Araştırma puanı (AP) toplam üretimden gelir: floor(sqrt(üretilen / RESEARCH_DIV)). Düğüm maliyeti = ceil(base * growth^seviye).
+export const RESEARCH_DIV = 50;
+export const RESEARCH_BRANCHES = { eff: 'Verimlilik', auto: 'Otomasyon', luck: 'Şans' };
+export const RESEARCH = [
+  { id: 'r_inc1',  branch: 'eff',  name: 'Hassas Ölçüm',   desc: 'Gelir +%5',                        max: 5, base: 1, growth: 1.5 },
+  { id: 'r_inc2',  branch: 'eff',  name: 'Kaizen',         desc: 'Gelir +%8',                        max: 5, base: 3, growth: 1.6, req: ['r_inc1', 2] },
+  { id: 'r_disc',  branch: 'eff',  name: 'Yalın Üretim',   desc: 'Makine fiyatları -%3',             max: 5, base: 6, growth: 1.7, req: ['r_inc2', 2] },
+  { id: 'r_tap',   branch: 'auto', name: 'Hızlı Eller',    desc: 'Dokunuş gücü +0,15 sn',            max: 5, base: 1, growth: 1.5 },
+  { id: 'r_cap',   branch: 'auto', name: 'Gece Mesaisi',   desc: 'Çevrimdışı süre +2 saat',          max: 5, base: 3, growth: 1.6, req: ['r_tap', 2] },
+  { id: 'r_eff',   branch: 'auto', name: 'Akıllı Bant',    desc: 'Çevrimdışı verim +%4',             max: 5, base: 6, growth: 1.7, req: ['r_cap', 2] },
+  { id: 'r_gold',  branch: 'luck', name: 'Altın Radar',    desc: 'Altın Kasa %10 daha sık',          max: 5, base: 1, growth: 1.5 },
+  { id: 'r_vault', branch: 'luck', name: 'Sağlam Kasa',    desc: 'Altın Kasa ödülü +%15',            max: 5, base: 3, growth: 1.6, req: ['r_gold', 2] },
+  { id: 'r_rush',  branch: 'luck', name: 'Sipariş Ağı',    desc: 'Acil Sipariş ödülü +%20, daha sık', max: 5, base: 6, growth: 1.7, req: ['r_vault', 2] },
+];
+
+// ---------------------------------------------------------------- Zincir bonusu
+// Aynı bölgede arka arkaya otomatik çalışan makineler birbirini besler: her bağlantı aşağı akıştaki makinenin değerine x(1+bonus) ekler.
+export const CHAIN_BONUS = 0.10;
+
+// ---------------------------------------------------------------- Ürün kataloğu
+export const PRODUCT_NAMES = { block: 'Blok', ball: 'Top', bot: 'Robot', chip: 'Çip', gear: 'Dişli', box: 'Kutu', rocket: 'Roket', crystal: 'Kristal', star: 'Yıldız', orb: 'Küre', hourglass: 'Kum Saati' };
+export const CATALOG_TIERS = [100, 1e3, 1e4, 1e5, 1e6];   // satılan adet eşikleri
+export const CATALOG_BONUS = 0.004;                        // tamamlanan her eşik için kalıcı gelir bonusu
+
+// ---------------------------------------------------------------- Galaktik Genişleme (ikinci prestij)
+// Ömür boyu kazanılan Patent Yıldızı yeterliyse yıldızlar, patentler ve koşu sıfırlanır; Kozmik Çekirdek verir.
+export const ASCEND = { need: 250, coreIncome: 0.5, coreStar: 0.5 };   // çekirdek başına gelir +%50 ve yıldız etkisi +%50
+
+// ---------------------------------------------------------------- Rastgele fabrika olayları
+export const EVENTS = {
+  minSold: 300, firstMin: 240, firstMax: 420, gapMin: 420, gapMax: 780,
+  types: [
+    { id: 'surge',    weight: 3, secs: 45, mult: 2 },                   // Talep Patlaması: x2 gelir
+    { id: 'vip',      weight: 2, secs: 15, mult: 3 },                   // VIP Müşteri: x3 gelir
+    { id: 'blackout', weight: 2, secs: 25, taps: 8, rewardSecs: 60 },  // Elektrik Kesintisi: dokunarak onar
+  ],
+};
+
+// ---------------------------------------------------------------- Takvim etkinlikleri (yerel saate göre)
+export const CALENDAR = {
+  weekend: { id: 'weekend', name: 'Hafta Sonu', desc: 'Gelir +%25', income: 1.25 },
+  weeks: [
+    { id: 'w_eff',  name: 'Verimlilik Haftası', desc: 'Gelir +%10',                      income: 1.10 },
+    { id: 'w_luck', name: 'Şans Haftası',       desc: 'Altın Kasa %50 daha sık',         golden: 1.5 },
+    { id: 'w_rush', name: 'Sipariş Haftası',    desc: 'Acil Sipariş ödülü +%50',         rush: 1.5 },
+    { id: 'w_task', name: 'Görev Haftası',      desc: 'Günlük görev ödülleri +%50',      mission: 1.5 },
+  ],
+};
+
+// ---------------------------------------------------------------- Kozmetik temalar (rozet sayısıyla açılır)
+// tint: sahnenin üstüne bindirilen renk; belt: bant rengi; hue: makine/ürün renk kaydırma (derece).
 export const THEMES = {
-  classic: { name: 'Klasik' }, // kozmetik temalar için ayrılmış yer (bkz. docs/MONETIZATION.md)
+  classic: { name: 'Klasik',       badges: 0,  tint: null,                       belt: null,      hue: 0 },
+  candy:   { name: 'Şeker Dünyası', badges: 5,  tint: 'rgba(255,140,200,.20)',    belt: '#b04a88', hue: 300 },
+  night:   { name: 'Gece Vardiyası', badges: 12, tint: 'rgba(15,25,90,.42)',      belt: '#2d3a6b', hue: 0 },
+  neon:    { name: 'Neon Şehir',   badges: 20, tint: 'rgba(0,255,210,.14)',       belt: '#0b4f48', hue: 150 },
+  golden:  { name: 'Altın Çağ',    badges: 30, tint: 'rgba(255,196,60,.24)',      belt: '#7a5c10', hue: 40 },
 };

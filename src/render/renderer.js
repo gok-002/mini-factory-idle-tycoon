@@ -1,6 +1,8 @@
 // Fabrika sahnesi: yerleşim, arka plan önbelleği, bant/ürün/makine çizimi ve efekt olayları.
-import { MACHINES, ZONES, TUNING, SLOTS_PER_ZONE } from '../core/config.js';
-import { visualTier, storageCap } from '../core/economy.js';
+import { MACHINES, ZONES, TUNING, SLOTS_PER_ZONE, THEMES } from '../core/config.js';
+import { visualTier, storageCap, chainDepth, chainMult } from '../core/economy.js';
+import { themedColor } from './theme.js';
+import { t, onLangChange } from '../i18n.js';
 import { formatNum } from '../core/format.js';
 import { FONT, OUT, rr, shade, drawMachine, drawProduct, drawLock } from './draw.js';
 import { FX, K, C } from './fx.js';
@@ -34,8 +36,13 @@ export class Renderer {
     this.fx.target = this.coinTarget;
     this.onCoinArrive = null;
     this.o = { color: '#fff', tier: 0, p: 0, t: 0, pulse: 0, auto: false, blocked: false, level: 1 }; // yeniden kullanılan çizim parametresi
+    this.themeId = '';
+    onLangChange(() => { this.bgDirty = true; });
     this.setZone(0);
   }
+
+  /** Temaya göre renk kaymış makine/ürün rengi. */
+  _col(def) { return themedColor(this.game.state.theme, def.color); }
 
   setZone(z) {
     this.zone = z;
@@ -95,9 +102,10 @@ export class Renderer {
     c.fillStyle = 'rgba(255,255,255,.5)'; c.fillRect(0, wh - 8, W, 2);
     c.fillStyle = OUT; c.fillRect(0, wh - 2, W, 2);
     // tabela
-    c.font = '800 13px ' + FONT; const tw = c.measureText(z.name).width + 26;
+    const zname = t(z.name);
+    c.font = '800 13px ' + FONT; const tw = c.measureText(zname).width + 26;
     rr(c, W / 2 - tw / 2, 2, tw, 20, 8); c.fillStyle = '#fff7e0'; c.fill(); c.lineWidth = 2; c.strokeStyle = OUT; c.stroke();
-    c.fillStyle = OUT; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(z.name, W / 2, 13);
+    c.fillStyle = OUT; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(zname, W / 2, 13);
     // zemin
     for (let k = 0; k < SLOTS_PER_ZONE; k++) {
       const y = this.laneTop(k);
@@ -108,6 +116,9 @@ export class Renderer {
       c.fillStyle = 'rgba(0,0,0,.14)'; c.fillRect(0, y, W, 2);
     }
     this._drawBeams(c);
+    const th = THEMES[this.game.state.theme];
+    if (th && th.tint) { c.fillStyle = th.tint; c.fillRect(0, 0, W, H); }   // tema rengi
+    this.themeId = this.game.state.theme;
     this.bgDirty = false;
   }
 
@@ -234,7 +245,7 @@ export class Renderer {
   // ------------------------------------------------------------------ çerçeve
   frame(dt) {
     if (!this.W) return;
-    if (this.bgDirty) this._drawBackground();
+    if (this.bgDirty || this.themeId !== this.game.state.theme) this._drawBackground();
     this.t += dt; this.dt = dt;
     this.fx.update(dt);
     if (this.fx.arrived > 0) { const n = this.fx.arrived; this.fx.arrived = 0; if (this.onCoinArrive) this.onCoinArrive(n); }
@@ -255,6 +266,12 @@ export class Renderer {
       else this._drawLocked(k, mi);
     }
     this._drawGolden(ctx);
+    if (game.dark) {                 // elektrik kesintisi: sahne kararır ve titrer
+      const f = 0.5 + 0.1 * Math.sin(this.t * 9) + (Math.sin(this.t * 31) > 0.92 ? 0.15 : 0);
+      ctx.fillStyle = 'rgba(6,8,28,' + f.toFixed(2) + ')'; ctx.fillRect(0, 0, this.W, this.H);
+      ctx.textAlign = 'center'; ctx.font = '800 22px ' + FONT; ctx.lineWidth = 5; ctx.strokeStyle = OUT;
+      ctx.strokeText(t('KESİNTİ'), this.W / 2, this.H * 0.55); ctx.fillStyle = '#ffd23f'; ctx.fillText(t('KESİNTİ'), this.W / 2, this.H * 0.55);
+    }
     this.fx.draw(ctx);
     if (this.fade > 0) {           // bölge geçişi: karardan açılma
       this.fade = Math.max(0, this.fade - dt * 3.2);
@@ -299,7 +316,7 @@ export class Renderer {
   goldenFx(reward, frenzy) {
     this.fx.burst(K.COIN, this.W / 2, this.H * 0.4, 16, 260, 1, 6, C.GOLD);
     this.fx.burst(K.STAR, this.W / 2, this.H * 0.4, 8, 180, 0.9, 9, C.GOLD);
-    this.fx.text(frenzy ? 'COŞKU x3!' : '+' + formatNum(reward), this.W / 2, this.H * 0.35, C.GOLD, 24);
+    this.fx.text(frenzy ? t('COŞKU x3!') : '+' + formatNum(reward), this.W / 2, this.H * 0.35, C.GOLD, 24);
   }
 
   _drawLane(k, mi, m) {
@@ -314,7 +331,8 @@ export class Renderer {
 
     // bant
     const bh = 13, bty = by - bh + 3;
-    rr(ctx, x0 - 8, bty, x1 - x0 + 22, bh, 6); ctx.fillStyle = z.belt; ctx.fill();
+    const th = THEMES[this.game.state.theme];
+    rr(ctx, x0 - 8, bty, x1 - x0 + 22, bh, 6); ctx.fillStyle = (th && th.belt) || z.belt; ctx.fill();
     ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
     const moving = m.auto || r.count > 0;
     const off = moving ? (this.t * 34) % 14 : 0;
@@ -338,7 +356,8 @@ export class Renderer {
 
     // makine
     const o = this.o;
-    o.color = def.color; o.tier = visualTier(m.level); o.p = r.progress > 1 ? 1 : r.progress; o.t = this.t;
+    const col = this._col(def);
+    o.color = col; o.tier = visualTier(m.level); o.p = r.progress > 1 ? 1 : r.progress; o.t = this.t;
     o.pulse = r.pulse; o.auto = m.auto; o.blocked = r.blocked; o.level = m.level;
     const mh = Math.min(this.laneH * 0.8, this.mw * 1.0), cx = this.machineX();
     ctx.save();
@@ -356,7 +375,7 @@ export class Renderer {
       const f = r.ages[q] / TUNING.beltTravelTime;
       const px = x0 + (x1 - x0 + 8) * (f > 1 ? 1 : f);
       ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(px, bty + 1, size * 0.42, 2.2, 0, 0, PI2); ctx.fill();
-      drawProduct(ctx, def.product, px, iy - Math.abs(Math.sin(f * 14)) * 1.5, size, def.color);
+      drawProduct(ctx, def.product, px, iy - Math.abs(Math.sin(f * 14)) * 1.5, size, col);
     }
 
     // otomatik makineden periyodik buhar
@@ -369,22 +388,35 @@ export class Renderer {
     }
 
     // seviye rozeti
-    const label = 'Sv.' + m.level;
+    const label = t('Sv.') + m.level;
     ctx.font = '800 11px ' + FONT;
     const lw = ctx.measureText(label).width + 12;
     rr(ctx, 6, this.laneTop(k) + 5, lw, 17, 8); ctx.fillStyle = OUT; ctx.fill();
     ctx.fillStyle = '#ffd23f'; ctx.textAlign = 'left'; ctx.fillText(label, 12, this.laneTop(k) + 14);
 
+    // zincir bonusu: önceki makineden beslenen makinede rozet ve besleme oku
+    const depth = chainDepth(this.game.state, mi);
+    if (depth > 0) {
+      const ct = t('ZİNCİR') + ' x' + chainMult(this.game.state, mi).toFixed(2), top = this.laneTop(k);
+      ctx.font = '800 10px ' + FONT;
+      const cw = ctx.measureText(ct).width + 12;
+      rr(ctx, 6, top + 25, cw, 15, 7); ctx.fillStyle = '#12403a'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#06d6a0'; ctx.stroke();
+      ctx.fillStyle = '#7dffd8'; ctx.textAlign = 'left'; ctx.fillText(ct, 12, top + 33);
+      const ax = cx, bob = Math.sin(this.t * 6) * 2;
+      ctx.beginPath(); ctx.moveTo(ax - 8, top + 1 + bob); ctx.lineTo(ax + 8, top + 1 + bob); ctx.lineTo(ax, top + 11 + bob); ctx.closePath();
+      ctx.fillStyle = '#06d6a0'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+    }
+
     // ilk dokunuş ipucu
     if (!m.auto && selected && this.game.state.stats.taps < 8 && mi === 0) {
       const bob = Math.sin(this.hintTime * 5) * 4;
       ctx.textAlign = 'center'; ctx.font = '800 15px ' + FONT;
-      ctx.lineWidth = 4; ctx.strokeStyle = OUT; ctx.strokeText('DOKUN!', cx, by - mh - 6 + bob);
-      ctx.fillStyle = '#fff'; ctx.fillText('DOKUN!', cx, by - mh - 6 + bob);
+      ctx.lineWidth = 4; ctx.strokeStyle = OUT; ctx.strokeText(t('DOKUN!'), cx, by - mh - 6 + bob);
+      ctx.fillStyle = '#fff'; ctx.fillText(t('DOKUN!'), cx, by - mh - 6 + bob);
     }
     if (r.blocked || (r.count >= storageCap(m) && !m.auto)) { // depo dolu uyarısı
       ctx.textAlign = 'center'; ctx.font = '800 11px ' + FONT;
-      ctx.fillStyle = '#ff5252'; ctx.fillText('BANT DOLU', (x0 + x1) / 2, bty - 20);
+      ctx.fillStyle = '#ff5252'; ctx.fillText(t('BANT DOLU'), (x0 + x1) / 2, bty - 20);
     }
   }
 
@@ -408,7 +440,7 @@ export class Renderer {
     const blink = !happy && ((this.t * 0.8 + k * 1.3) % 3.2) > 3.05;
     ctx.beginPath(); ctx.arc(0, cy, hr, 0, PI2); ctx.fillStyle = '#ffd8a8'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
     ctx.beginPath(); ctx.arc(0, cy - hr * 0.35, hr * 1.02, Math.PI, 0); ctx.lineTo(hr * 1.25, cy - hr * 0.3); ctx.lineTo(-hr * 1.25, cy - hr * 0.3); ctx.closePath();
-    ctx.fillStyle = def.color; ctx.fill(); ctx.stroke();                       // şapka
+    ctx.fillStyle = this._col(def); ctx.fill(); ctx.stroke();                       // şapka
     ctx.fillStyle = OUT; ctx.strokeStyle = OUT; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
     for (const ex of [-hr * 0.4, hr * 0.4]) {
       if (happy) { ctx.beginPath(); ctx.arc(ex, cy + hr * 0.12, hr * 0.17, Math.PI, 0); ctx.stroke(); }
@@ -435,7 +467,7 @@ export class Renderer {
     rr(ctx, bx, byy, bw, bh, 10); ctx.fillStyle = '#fff7e0'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(dx - 6, byy + bh - 1); ctx.lineTo(dx, byy + bh + 8); ctx.lineTo(dx + 6, byy + bh - 1); ctx.fillStyle = '#fff7e0'; ctx.fill();
     ctx.beginPath(); ctx.moveTo(dx - 6, byy + bh); ctx.lineTo(dx, byy + bh + 8); ctx.lineTo(dx + 6, byy + bh); ctx.stroke();
-    drawProduct(ctx, def.product, bx + 17, byy + bh / 2 + 3, 15, def.color);
+    drawProduct(ctx, def.product, bx + 17, byy + bh / 2 + 3, 15, this._col(def));
     ctx.font = '800 14px ' + FONT; ctx.fillStyle = OUT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText('×' + Math.max(0, rush.target - rush.got), bx + 32, byy + bh / 2 + 1);
     ctx.restore();
@@ -461,20 +493,20 @@ export class Renderer {
     if (next) {
       const pulse = afford ? 1 + Math.sin(this.t * 5) * 0.05 : 1;
       ctx.translate(cx, y + h / 2); ctx.scale(pulse, pulse);
-      ctx.font = '800 14px ' + FONT; ctx.fillStyle = OUT; ctx.fillText(def.name, 0, -h * 0.3);
-      const label = levelBlocked ? 'Önceki makine Sv.' + block.need + ' olmalı (' + block.have + '/' + block.need + ')' : '+ SATIN AL  ' + formatNum(cost);
+      ctx.font = '800 14px ' + FONT; ctx.fillStyle = OUT; ctx.fillText(t(def.name), 0, -h * 0.3);
+      const label = t(levelBlocked ? 'Önceki makine Sv.' + block.need + ' olmalı (' + block.have + '/' + block.need + ')' : '+ SATIN AL  ' + formatNum(cost));
       ctx.font = '800 ' + (levelBlocked ? 13 : 15) + 'px ' + FONT;
       const bw = Math.min(this.W - 40, ctx.measureText(label).width + 30);
       rr(ctx, -bw / 2, -h * 0.1, bw, 32, 14);
       ctx.fillStyle = afford ? '#35c978' : '#9aa3b5'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.fillText(label, 0, -h * 0.1 + 17);
       ctx.font = '700 11px ' + FONT; ctx.fillStyle = 'rgba(43,45,66,.65)';
-      if (levelBlocked) ctx.fillText('Önceki makineyi yükselt', 0, h * 0.28);
-      else if (!afford) ctx.fillText('Daha fazla para biriktir', 0, h * 0.28);
+      if (levelBlocked) ctx.fillText(t('Önceki makineyi yükselt'), 0, h * 0.28);
+      else if (!afford) ctx.fillText(t('Daha fazla para biriktir'), 0, h * 0.28);
     } else {
       drawLock(ctx, cx, y + h / 2 - 8, 26);
       ctx.font = '700 12px ' + FONT; ctx.fillStyle = 'rgba(43,45,66,.6)';
-      ctx.fillText(def.name, cx, y + h / 2 + 24);
+      ctx.fillText(t(def.name), cx, y + h / 2 + 24);
     }
     ctx.restore();
   }
@@ -507,9 +539,9 @@ export class Renderer {
       case 'buyMachine': case 'auto': case 'levelUp': case 'upgrade': {
         if (k < 0) return;
         const x = this.machineX(), y = this.baseY(k) - this.laneH * 0.4;
-        if (type === 'buyMachine') { fx.burst(K.CONFETTI, x, y, 26, 230, 1.1, 4, -1); fx.burst(K.STAR, x, y, 8, 160, 0.9, 9, C.GOLD); fx.ring(x, y, 50, C.GOLD); fx.text('YENİ MAKİNE!', x + 20, y - 40, C.GOLD, 18); }
-        else if (type === 'auto') { fx.ring(x, y, 44, C.GREEN); fx.burst(K.STAR, x, y, 6, 130, 0.8, 8, C.GREEN); fx.text('OTOMATİK!', x + 20, y - 40, C.GREEN, 16); }
-        else if (type === 'levelUp') { fx.ring(x, y, 40, C.WHITE); fx.burst(K.STAR, x, y, 7, 140, 0.8, 8, C.GOLD); fx.text('SEVİYE ' + b + '!', x + 16, y - 36, C.WHITE, 16); }
+        if (type === 'buyMachine') { fx.burst(K.CONFETTI, x, y, 26, 230, 1.1, 4, -1); fx.burst(K.STAR, x, y, 8, 160, 0.9, 9, C.GOLD); fx.ring(x, y, 50, C.GOLD); fx.text(t('YENİ MAKİNE!'), x + 20, y - 40, C.GOLD, 18); }
+        else if (type === 'auto') { fx.ring(x, y, 44, C.GREEN); fx.burst(K.STAR, x, y, 6, 130, 0.8, 8, C.GREEN); fx.text(t('OTOMATİK!'), x + 20, y - 40, C.GREEN, 16); }
+        else if (type === 'levelUp') { fx.ring(x, y, 40, C.WHITE); fx.burst(K.STAR, x, y, 7, 140, 0.8, 8, C.GOLD); fx.text(t('SEVİYE') + ' ' + b + '!', x + 16, y - 36, C.WHITE, 16); }
         else { fx.ring(x, y, 36, C.BLUE); fx.burst(K.STAR, x, y, 5, 120, 0.7, 7, C.BLUE); }
         break;
       }
@@ -520,13 +552,32 @@ export class Renderer {
       case 'rushStart': {
         if (k < 0) return;
         fx.ring(this.beltX1() + this.dockW / 2, this.baseY(k) - 40, 46, C.ORANGE);
-        fx.text('SİPARİŞ!', this.W / 2, this.laneTop(k) + this.laneH * 0.5, C.ORANGE, 22);
+        fx.text(t('SİPARİŞ!'), this.W / 2, this.laneTop(k) + this.laneH * 0.5, C.ORANGE, 22);
         break;
       }
       case 'rushDone':
         fx.burst(K.CONFETTI, this.W / 2, this.H * 0.4, 40, 280, 1.3, 4, -1);
         fx.burst(K.COIN, this.W / 2, this.H * 0.4, 12, 240, 1, 6, C.GOLD);
-        fx.text('TESLİM EDİLDİ!', this.W / 2, this.H * 0.34, C.GREEN, 22);
+        fx.text(t('TESLİM EDİLDİ!'), this.W / 2, this.H * 0.34, C.GREEN, 22);
+        break;
+      case 'eventStart':
+        fx.ring(this.W / 2, this.H * 0.45, 70, a === 'blackout' ? C.RED : C.BLUE);
+        break;
+      case 'eventDone':
+        fx.burst(K.CONFETTI, this.W / 2, this.H * 0.4, 40, 280, 1.3, 4, -1);
+        fx.burst(K.COIN, this.W / 2, this.H * 0.4, 12, 240, 1, 6, C.GOLD);
+        fx.text(t('ONARILDI!'), this.W / 2, this.H * 0.34, C.GREEN, 22);
+        break;
+      case 'eventTap':
+        fx.burst(K.SPARK, this.W / 2, this.H * 0.5, 4, 120, 0.4, 4, C.GOLD);
+        break;
+      case 'staff': case 'research': case 'catalog':
+        fx.burst(K.STAR, this.W / 2, this.H * 0.4, 8, 170, 0.9, 8, type === 'research' ? C.TEAL : C.GOLD);
+        fx.ring(this.W / 2, this.H * 0.4, 50, type === 'research' ? C.TEAL : C.GOLD);
+        break;
+      case 'ascend':
+        fx.burst(K.CONFETTI, this.W / 2, this.H * 0.4, 70, 340, 1.6, 5, -1);
+        fx.ring(this.W / 2, this.H * 0.4, 110, C.PURPLE);
         break;
       case 'achievement':
         fx.burst(K.STAR, this.W / 2, this.H * 0.45, 10, 200, 1, 9, C.GOLD);

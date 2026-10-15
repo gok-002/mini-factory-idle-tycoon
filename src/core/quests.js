@@ -1,4 +1,5 @@
 import { QUESTS, MACHINES } from './config.js';
+import { catTiers } from './economy.js';
 
 export const METRICS = {
   produced:    (s) => s.stats.produced,
@@ -11,6 +12,11 @@ export const METRICS = {
   rushDone:    (s) => s.stats.rushDone,
   missionsDone: (s) => s.stats.missionsDone,
   dailyStreak: (s) => s.daily.streak,
+  eventsDone:  (s) => s.stats.eventsDone,
+  staffTotal:  (s) => Object.values(s.staff).reduce((a, b) => a + b, 0),
+  rdTotal:     (s) => Object.values(s.rd).reduce((a, b) => a + b, 0),
+  catalogTiers: (s) => catTiers(s),
+  cores:       (s) => s.meta.cores,
   prestiges:   (s) => s.meta.prestiges,
   totalStars:  (s) => s.meta.totalStars,
   automations: (s) => s.machines.reduce((a, m) => a + (m.auto ? 1 : 0), 0),

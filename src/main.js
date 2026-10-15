@@ -1,5 +1,6 @@
 // Giriş noktası: bileşenleri bağlar, oyun döngüsünü, kaydı ve arka plan davranışını yönetir.
-import { TUNING, MACHINES, ACHIEVEMENTS, RUSH } from './core/config.js';
+import { TUNING, MACHINES, ACHIEVEMENTS, RUSH, PRODUCT_NAMES, CATALOG_TIERS } from './core/config.js';
+import { detectLang, setLang } from './i18n.js';
 import { SaveManager, MemoryStorage } from './core/save.js';
 import { Game } from './core/sim.js';
 import { Renderer } from './render/renderer.js';
@@ -41,7 +42,7 @@ const game = new Game(loaded.state, (type, a, b, c) => {
     case 'prestige': feedback.fanfare(); renderer && renderer.setZone(0); ui && (ui.closeSheet(true), ui.toast('Fabrika yenilendi! +' + formatNum(a) + ' Yıldız')); break;
     case 'questReady': feedback.quest(); ui && ui.toast('Görev tamamlandı! Ödülünü al.'); break;
     case 'questClaimed': feedback.quest(); break;
-    case 'deny': feedback.deny(); ui && ui.toast(a === 'money' ? 'Yeterli paran yok!' : a === 'stars' ? 'Yeterli Yıldız yok!' : a === 'level' ? 'Önceki makinenin seviyesi yetersiz (Sv.' + b + ')' : 'Yapılamaz'); break;
+    case 'deny': feedback.deny(); ui && ui.toast(a === 'money' ? 'Yeterli paran yok!' : a === 'stars' ? 'Yeterli Yıldız yok!' : a === 'rp' ? 'Yeterli araştırma puanı yok!' : a === 'locked' ? 'Önce ön koşul düğümünü yükselt!' : a === 'level' ? 'Önceki makinenin seviyesi yetersiz (Sv.' + b + ')' : 'Yapılamaz'); break;
     case 'blocked': break;
     case 'achievement': {
       const ach = ACHIEVEMENTS.find((x) => x.id === a);
@@ -65,6 +66,20 @@ const game = new Game(loaded.state, (type, a, b, c) => {
       break;
     case 'rushDone': feedback.fanfare(); ui && ui.notify('coin', 'Sipariş teslim edildi!', '+' + formatNum(b) + ' kazandın'); break;
     case 'rushFail': ui && ui.toast('Sipariş kaçtı… Bir sonrakinde yakala!'); break;
+    case 'eventStart':
+      if (!ui) break;
+      feedback.alarm();
+      if (a === 'blackout') ui.notify('wrench', 'Elektrik kesintisi!', 'Üstteki banda hızlıca dokunup onar');
+      else if (a === 'vip') ui.notify('star', 'VIP müşteri geldi!', 'Gelir x3 · 15 sn');
+      else ui.notify('bolt', 'Talep patlaması!', 'Gelir x2 · 45 sn');
+      break;
+    case 'eventDone': feedback.fanfare(); ui && ui.notify('coin', 'Elektrik geri geldi!', '+' + formatNum(b) + ' kazandın'); break;
+    case 'eventEnd': if (a === 'blackout') ui && ui.toast('Elektrik kendiliğinden geri geldi'); break;
+    case 'staff': feedback.upgrade(); ui && ui.toast('Yeni çalışan işe alındı!'); break;
+    case 'research': feedback.upgrade(); ui && ui.toast('Araştırma tamamlandı!'); break;
+    case 'catalog': feedback.medal(); ui && ui.notify('book', 'Katalog eşiği tamamlandı!', PRODUCT_NAMES[a] + '  ·  ' + b + '/' + CATALOG_TIERS.length + '  ·  +%0,4 gelir'); break;
+    case 'ascend': feedback.fanfare(); renderer && renderer.setZone(0); ui && (ui.closeSheet(true), ui.toast('Galaktik Genişleme! +' + a + ' Kozmik Çekirdek')); break;
+    case 'theme': feedback.upgrade(); break;
     default:
   }
 });
@@ -75,12 +90,16 @@ function save() {
   if (!saveMgr.save(game.state) && !save.warned) { save.warned = true; ui && ui.toast('Kayıt yapılamadı (depolama dolu/kapalı)'); }
 }
 
+game.calendarOn = true; game.eventsOn = true;        // gerçek oyunda takvim etkinlikleri ve rastgele olaylar açık
+game.refresh();
 renderer = new Renderer(document.getElementById('game'), game);
 ui = new UI(game, renderer, feedback, saveMgr, {
   save,
   reset() { noSave = true; saveMgr.reset(); location.reload(); },
   importState(state) { noSave = true; if (saveMgr.save(state)) location.reload(); else { noSave = false; ui.toast('Kayıt yüklenemedi (depolama dolu/kapalı)'); } },
 });
+
+if (detectLang(loaded.state.settings.lang) === 'en') setLang('en');
 
 function selectInitialZone() {
   const z = MACHINES[game.state.selected].zone;
